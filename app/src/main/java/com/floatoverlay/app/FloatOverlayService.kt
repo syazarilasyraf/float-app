@@ -33,8 +33,8 @@ class FloatOverlayService : Service() {
     private lateinit var repository: OverlayRepository
     private lateinit var counter: NotificationCounter
 
-    private val overlayViews = mutableListOf<View>()
-    private val overlayParamsList = mutableListOf<WindowManager.LayoutParams>()
+    private val overlayViews = mutableMapOf<String, FrameLayout>()
+    private val overlayParams = mutableMapOf<String, WindowManager.LayoutParams>()
     private var iconParams: WindowManager.LayoutParams? = null
 
     private var initialX = 0
@@ -74,8 +74,9 @@ class FloatOverlayService : Service() {
                 clearBadge()
             }
             ACTION_RELOAD_OVERLAYS -> {
-                LogStore.log(TAG, "Reload overlays command received")
-                reloadOverlays()
+                val id = intent.getStringExtra(EXTRA_OVERLAY_ID)
+                LogStore.log(TAG, "Reload overlays command received, id=$id")
+                reloadOverlays(id)
             }
         }
         return START_STICKY
@@ -177,26 +178,23 @@ class FloatOverlayService : Service() {
                 return
             }
 
-            if (overlayViews.isNotEmpty()) {
-                overlayViews.forEach { it.visibility = View.VISIBLE }
-                isExpanded = true
-                iconView?.visibility = View.GONE
-                clearBadge()
-                return
-            }
-
             val baseX = iconParams?.x ?: dpToPx(16)
             val baseY = (iconParams?.y ?: dpToPx(100)) + dpToPx(56)
 
             configs.forEachIndexed { index, config ->
-                val x = if (config.posX >= 0) config.posX else baseX + dpToPx(index * 16)
-                val y = if (config.posY >= 0) config.posY else baseY + dpToPx(index * 16)
-                val params = createOverlayParams(config, x, y)
-                val container = createOverlayView(config, params)
-                overlayViews.add(container)
-                overlayParamsList.add(params)
-                windowManager?.addView(container, params)
-                LogStore.log(TAG, "Overlay #${index + 1} (${config.name}) added at $x,$y")
+                if (!overlayViews.containsKey(config.id)) {
+                    val x = if (config.posX >= 0) config.posX else baseX + dpToPx(index * 16)
+                    val y = if (config.posY >= 0) config.posY else baseY + dpToPx(index * 16)
+                    val params = createOverlayParams(config, x, y)
+                    val container = createOverlayView(config, params)
+                    overlayViews[config.id] = container
+                    overlayParams[config.id] = params
+                    windowManager?.addView(container, params)
+                    LogStore.log(TAG, "Overlay (${config.name}) added at $x,$y")
+                } else {
+                    overlayViews[config.id]?.visibility = View.VISIBLE
+                    LogStore.log(TAG, "Overlay (${config.name}) already exists, showing")
+                }
             }
 
             isExpanded = true
@@ -211,17 +209,50 @@ class FloatOverlayService : Service() {
 
     private fun hideOverlays() {
         LogStore.log(TAG, "Hiding overlays")
-        overlayViews.forEach { it.visibility = View.GONE }
+        overlayViews.values.forEach { it.visibility = View.GONE }
         isExpanded = false
         iconView?.visibility = View.VISIBLE
     }
 
-    private fun reloadOverlays() {
-        LogStore.log(TAG, "Reloading overlays")
-        removeOverlayViewsOnly()
-        if (isExpanded) {
-            showOverlays()
+    private fun reloadOverlays(changedId: String?) {
+        LogStore.log(TAG, "Reloading overlays, changedId=$changedId")
+        try {
+            val configs = repository.getEnabledOverlays().associateBy { it.id }
+
+            // Remove overlays that are no longer enabled or were changed (unless locked and not the changed one)
+            val idsToRemove = overlayViews.keys.filter { id ->
+                val config = configs[id]
+                when {
+                    config == null -> true // disabled/deleted
+                    changedId == null -> !config.locked // full reload, only remove unlocked
+                    id == changedId -> true // this one changed, recreate it
+                    else -> false // leave others alone
+                }
+            }
+
+            idsToRemove.forEach { id ->
+                removeOverlayView(id)
+            }
+
+            // Add or recreate needed overlays
+            if (isExpanded) {
+                showOverlays()
+            }
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "reloadOverlays failed", e)
         }
+    }
+
+    private fun removeOverlayView(id: String) {
+        overlayViews[id]?.let {
+            try {
+                windowManager?.removeView(it)
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "removeOverlayView $id", e)
+            }
+        }
+        overlayViews.remove(id)
+        overlayParams.remove(id)
     }
 
     private fun createOverlayParams(config: OverlayConfig, x: Int, y: Int): WindowManager.LayoutParams {
@@ -333,43 +364,6 @@ class FloatOverlayService : Service() {
         }
     }
 
-    private fun pxToDp(px: Int): Int {
-        return (px / resources.displayMetrics.density).toInt()
-    }
-
-    private fun setupIconDrag(view: View, params: WindowManager.LayoutParams) {
-        view.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = params.x
-                    initialY = params.y
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    isDragging = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.rawX - initialTouchX).toInt()
-                    val dy = (event.rawY - initialTouchY).toInt()
-                    if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) {
-                        isDragging = true
-                    }
-                    params.x = initialX + dx
-                    params.y = initialY + dy
-                    windowManager?.updateViewLayout(view, params)
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (!isDragging) {
-                        view.performClick()
-                    }
-                    true
-                }
-                else -> false
-            }
-        }
-    }
-
     private fun setupDrag(view: View, params: WindowManager.LayoutParams, config: OverlayConfig) {
         view.setOnTouchListener { _, event ->
             when (event.action) {
@@ -406,20 +400,41 @@ class FloatOverlayService : Service() {
         }
     }
 
-    private fun removeOverlayViewsOnly() {
-        overlayViews.forEach {
-            try {
-                windowManager?.removeView(it)
-            } catch (e: Exception) {
-                LogStore.logError(TAG, "removeOverlayViewsOnly", e)
+    private fun setupIconDrag(view: View, params: WindowManager.LayoutParams) {
+        view.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    isDragging = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - initialTouchX).toInt()
+                    val dy = (event.rawY - initialTouchY).toInt()
+                    if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) {
+                        isDragging = true
+                    }
+                    params.x = initialX + dx
+                    params.y = initialY + dy
+                    windowManager?.updateViewLayout(view, params)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        view.performClick()
+                    }
+                    true
+                }
+                else -> false
             }
         }
-        overlayViews.clear()
-        overlayParamsList.clear()
     }
 
     private fun removeViews() {
-        removeOverlayViewsOnly()
+        overlayViews.keys.toList().forEach { removeOverlayView(it) }
         iconView?.let {
             try {
                 windowManager?.removeView(it)
@@ -464,6 +479,10 @@ class FloatOverlayService : Service() {
         return (dp * resources.displayMetrics.density).toInt()
     }
 
+    private fun pxToDp(px: Int): Int {
+        return (px / resources.displayMetrics.density).toInt()
+    }
+
     companion object {
         private const val TAG = "FloatOverlayService"
         private const val CHANNEL_ID = "float_overlay_channel"
@@ -474,6 +493,7 @@ class FloatOverlayService : Service() {
         const val ACTION_RELOAD_OVERLAYS = "com.floatoverlay.app.RELOAD_OVERLAYS"
         const val EXTRA_CATEGORY = "category"
         const val EXTRA_AMOUNT = "amount"
+        const val EXTRA_OVERLAY_ID = "overlay_id"
 
         fun incrementBadge(context: Context, category: NotificationCounter.Category, amount: Int = 1) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
@@ -491,9 +511,10 @@ class FloatOverlayService : Service() {
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
 
-        fun reloadOverlays(context: Context) {
+        fun reloadOverlays(context: Context, overlayId: String? = null) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
                 action = ACTION_RELOAD_OVERLAYS
+                putExtra(EXTRA_OVERLAY_ID, overlayId)
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }

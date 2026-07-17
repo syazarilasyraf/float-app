@@ -46,7 +46,7 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
         addButton.setOnClickListener {
             OverlayEditDialog.show(requireContext()) { overlay ->
                 repository.addOrUpdate(overlay)
-                reloadOverlays()
+                reloadOverlays() // full reload for new overlay
                 refresh()
             }
         }
@@ -60,21 +60,21 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
     override fun onToggle(overlay: OverlayConfig, enabled: Boolean) {
         val latest = repository.getOverlay(overlay.id) ?: overlay
         repository.addOrUpdate(latest.copy(enabled = enabled))
-        reloadOverlays()
+        reloadOverlays(overlay.id)
     }
 
     override fun onEdit(overlay: OverlayConfig) {
         val latest = repository.getOverlay(overlay.id) ?: overlay
         OverlayEditDialog.show(requireContext(), latest) { updated ->
             repository.addOrUpdate(updated)
-            reloadOverlays()
+            reloadOverlays(overlay.id)
             refresh()
         }
     }
 
     override fun onDelete(overlay: OverlayConfig) {
         repository.delete(overlay.id)
-        reloadOverlays()
+        reloadOverlays() // full reload to remove it
         refresh()
     }
 
@@ -82,7 +82,7 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
         adapter.updateData(repository.getOverlays())
     }
 
-    private fun reloadOverlays() {
-        FloatOverlayService.reloadOverlays(requireContext())
+    private fun reloadOverlays(overlayId: String? = null) {
+        FloatOverlayService.reloadOverlays(requireContext(), overlayId)
     }
 }
