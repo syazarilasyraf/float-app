@@ -252,6 +252,8 @@ class FloatOverlayService : Service() {
         }
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
+        webView.settings.useWideViewPort = true
+        webView.settings.loadWithOverviewMode = true
         webView.setBackgroundColor(0x00000000)
 
         if (config.url.isNotBlank()) {
@@ -278,8 +280,58 @@ class FloatOverlayService : Service() {
         }
         container.addView(minimizeButton)
 
+        val resizeHandle = View(this).apply {
+            background = getDrawable(R.drawable.resize_handle)
+            layoutParams = FrameLayout.LayoutParams(dpToPx(20), dpToPx(20)).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+            }
+        }
+        setupResize(resizeHandle, params, config)
+        container.addView(resizeHandle)
+
         setupDrag(container, params)
         return container
+    }
+
+    private fun setupResize(handle: View, params: WindowManager.LayoutParams, config: OverlayConfig) {
+        var startWidth = 0
+        var startHeight = 0
+        var startX = 0f
+        var startY = 0f
+
+        handle.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startWidth = params.width
+                    startHeight = params.height
+                    startX = event.rawX
+                    startY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - startX).toInt()
+                    val dy = (event.rawY - startY).toInt()
+                    val newWidth = (startWidth + dx).coerceAtLeast(dpToPx(100))
+                    val newHeight = (startHeight + dy).coerceAtLeast(dpToPx(60))
+                    params.width = newWidth
+                    params.height = newHeight
+                    windowManager?.updateViewLayout(handle.parent as View, params)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val newWidthDp = pxToDp(params.width).coerceIn(50, 1000)
+                    val newHeightDp = pxToDp(params.height).coerceIn(50, 1000)
+                    repository.addOrUpdate(config.copy(widthDp = newWidthDp, heightDp = newHeightDp))
+                    LogStore.log(TAG, "Resized ${config.name} to ${newWidthDp}x${newHeightDp} dp")
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun pxToDp(px: Int): Int {
+        return (px / resources.displayMetrics.density).toInt()
     }
 
     private fun setupDrag(view: View, params: WindowManager.LayoutParams) {
