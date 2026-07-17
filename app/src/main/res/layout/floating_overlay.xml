@@ -20,6 +20,6 @@
         android:layout_margin="4dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="Minimize"
-        android:src="@android:drawable/arrow_down_float" />
+        android:src="@drawable/ic_minimize" />
 
 </FrameLayout>
