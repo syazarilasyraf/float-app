@@ -9,11 +9,10 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
-import android.widget.Toast
-import android.os.Handler
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -22,22 +21,20 @@ import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.TextView
-
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.floatoverlay.app.model.OverlayConfig
 
 class FloatOverlayService : Service() {
 
     private var windowManager: WindowManager? = null
-    private var overlayView: View? = null
     private var iconView: View? = null
-    private var webView: WebView? = null
-    private var overlayContainer: FrameLayout? = null
     private var badgeCounter: TextView? = null
     private lateinit var repository: OverlayRepository
     private lateinit var counter: NotificationCounter
 
-    private var overlayParams: WindowManager.LayoutParams? = null
+    private val overlayViews = mutableListOf<View>()
+    private val overlayParamsList = mutableListOf<WindowManager.LayoutParams>()
     private var iconParams: WindowManager.LayoutParams? = null
 
     private var initialX = 0
@@ -46,7 +43,6 @@ class FloatOverlayService : Service() {
     private var initialTouchY = 0f
     private var isDragging = false
 
-    private var currentConfig: OverlayConfig? = null
     private var isExpanded = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -76,6 +72,10 @@ class FloatOverlayService : Service() {
             }
             ACTION_CLEAR_BADGE -> {
                 clearBadge()
+            }
+            ACTION_RELOAD_OVERLAYS -> {
+                LogStore.log(TAG, "Reload overlays command received")
+                reloadOverlays()
             }
         }
         return START_STICKY
@@ -150,7 +150,7 @@ class FloatOverlayService : Service() {
         setupDrag(view, params)
         view.setOnClickListener {
             if (!isDragging) {
-                expandOverlay()
+                toggleOverlays()
             }
         }
 
@@ -158,128 +158,128 @@ class FloatOverlayService : Service() {
         windowManager?.addView(view, params)
     }
 
-    private fun expandOverlay() {
-        LogStore.log(TAG, "expandOverlay called")
+    private fun toggleOverlays() {
+        if (isExpanded) {
+            hideOverlays()
+        } else {
+            showOverlays()
+        }
+    }
+
+    private fun showOverlays() {
+        LogStore.log(TAG, "showOverlays called")
         try {
-            if (overlayView != null) {
-                LogStore.log(TAG, "Overlay already exists, showing it")
-                overlayView?.visibility = View.VISIBLE
+            val configs = repository.getEnabledOverlays()
+            LogStore.log(TAG, "Found ${configs.size} enabled overlays")
+
+            if (configs.isEmpty()) {
+                showToast("No enabled overlays. Add one in the app.")
+                return
+            }
+
+            if (overlayViews.isNotEmpty()) {
+                overlayViews.forEach { it.visibility = View.VISIBLE }
                 isExpanded = true
                 iconView?.visibility = View.GONE
                 clearBadge()
                 return
             }
 
-            currentConfig = repository.getEnabledOverlays().firstOrNull()
-            val config = currentConfig
-            val width = config?.widthDp ?: 240
-            val height = config?.heightDp ?: 160
-            LogStore.log(TAG, "Building overlay size ${width}x${height} dp, url=${config?.url}")
+            val baseX = iconParams?.x ?: dpToPx(16)
+            val baseY = (iconParams?.y ?: dpToPx(100)) + dpToPx(56)
 
-            val params = WindowManager.LayoutParams(
-                dpToPx(width),
-                dpToPx(height),
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else
-                    WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                PixelFormat.TRANSLUCENT
-            ).apply {
-                gravity = Gravity.TOP or Gravity.START
-                x = iconParams?.x ?: dpToPx(16)
-                y = (iconParams?.y ?: dpToPx(100)) + dpToPx(64)
+            configs.forEachIndexed { index, config ->
+                val params = createOverlayParams(config, baseX + dpToPx(index * 16), baseY + dpToPx(index * 16))
+                val container = createOverlayView(config, params)
+                overlayViews.add(container)
+                overlayParamsList.add(params)
+                windowManager?.addView(container, params)
+                LogStore.log(TAG, "Overlay #${index + 1} (${config.name}) added")
             }
-            overlayParams = params
 
-            val container = FrameLayout(this)
-            overlayContainer = container
-            LogStore.log(TAG, "FrameLayout created")
-
-            val webView = WebView(this)
-            this.webView = webView
-            webView.layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            ).apply {
-                topMargin = dpToPx(24)
-            }
-            container.addView(webView)
-            LogStore.log(TAG, "WebView added")
-
-            val minimizeButton = TextView(this).apply {
-                text = "−"
-                textSize = 24f
-                setTextColor(0xFFFFFFFF.toInt())
-                gravity = Gravity.CENTER
-                layoutParams = FrameLayout.LayoutParams(dpToPx(28), dpToPx(28)).apply {
-                    gravity = Gravity.TOP or Gravity.END
-                    setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
-                }
-                setOnClickListener {
-                    minimizeOverlay()
-                }
-            }
-            container.addView(minimizeButton)
-            LogStore.log(TAG, "Minimize button added")
-
-            applyConfigToView(config)
-            setupWebView(config)
-            setupDrag(container, params)
-
-            overlayView = container
-            windowManager?.addView(container, params)
-            LogStore.log(TAG, "Overlay added to WindowManager")
             isExpanded = true
             iconView?.visibility = View.GONE
             clearBadge()
         } catch (e: Exception) {
-            LogStore.logError(TAG, "expandOverlay failed", e)
-            Log.e(TAG, "expandOverlay failed", e)
+            LogStore.logError(TAG, "showOverlays failed", e)
+            Log.e(TAG, "showOverlays failed", e)
             showToast("Overlay error: ${e.message}")
         }
     }
 
-    private fun showToast(message: String) {
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun minimizeOverlay() {
-        LogStore.log(TAG, "Minimizing overlay")
-        overlayView?.visibility = View.GONE
+    private fun hideOverlays() {
+        LogStore.log(TAG, "Hiding overlays")
+        overlayViews.forEach { it.visibility = View.GONE }
         isExpanded = false
         iconView?.visibility = View.VISIBLE
     }
 
-    private fun applyConfigToView(config: OverlayConfig?) {
-        val container = overlayContainer ?: return
-        if (config != null) {
-            container.background = OverlayBackgroundDrawable.fromConfig(config)
+    private fun reloadOverlays() {
+        LogStore.log(TAG, "Reloading overlays")
+        removeOverlayViewsOnly()
+        if (isExpanded) {
+            showOverlays()
         }
     }
 
-    private fun setupWebView(config: OverlayConfig?) {
-        LogStore.log(TAG, "setupWebView called")
-        webView?.apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            setBackgroundColor(0x00000000)
+    private fun createOverlayParams(config: OverlayConfig, x: Int, y: Int): WindowManager.LayoutParams {
+        return WindowManager.LayoutParams(
+            dpToPx(config.widthDp.coerceIn(50, 1000)),
+            dpToPx(config.heightDp.coerceIn(50, 1000)),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            this.x = x
+            this.y = y
+        }
+    }
 
-            if (config != null && config.url.isNotBlank()) {
-                LogStore.log(TAG, "Loading URL: ${config.url}")
-                loadUrl(config.url)
-            } else {
-                loadDataWithBaseURL(
-                    null,
-                    SAMPLE_OVERLAY_HTML,
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
+    private fun createOverlayView(config: OverlayConfig, params: WindowManager.LayoutParams): FrameLayout {
+        val container = FrameLayout(this)
+        container.background = OverlayBackgroundDrawable.fromConfig(config)
+
+        val webView = WebView(this)
+        webView.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ).apply {
+            topMargin = dpToPx(24)
+        }
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.setBackgroundColor(0x00000000)
+
+        if (config.url.isNotBlank()) {
+            LogStore.log(TAG, "Loading URL for ${config.name}: ${config.url}")
+            webView.loadUrl(config.url)
+        } else {
+            LogStore.log(TAG, "Loading sample HTML for ${config.name}")
+            webView.loadDataWithBaseURL(null, SAMPLE_OVERLAY_HTML, "text/html", "UTF-8", null)
+        }
+        container.addView(webView)
+
+        val minimizeButton = TextView(this).apply {
+            text = "−"
+            textSize = 24f
+            setTextColor(0xFFFFFFFF.toInt())
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(dpToPx(28), dpToPx(28)).apply {
+                gravity = Gravity.TOP or Gravity.END
+                setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
+            }
+            setOnClickListener {
+                hideOverlays()
             }
         }
+        container.addView(minimizeButton)
+
+        setupDrag(container, params)
+        return container
     }
 
     private fun setupDrag(view: View, params: WindowManager.LayoutParams) {
@@ -315,15 +315,29 @@ class FloatOverlayService : Service() {
         }
     }
 
+    private fun removeOverlayViewsOnly() {
+        overlayViews.forEach {
+            try {
+                windowManager?.removeView(it)
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "removeOverlayViewsOnly", e)
+            }
+        }
+        overlayViews.clear()
+        overlayParamsList.clear()
+    }
+
     private fun removeViews() {
-        overlayView?.let { windowManager?.removeView(it) }
-        iconView?.let { windowManager?.removeView(it) }
-        overlayView = null
+        removeOverlayViewsOnly()
+        iconView?.let {
+            try {
+                windowManager?.removeView(it)
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "removeViews icon", e)
+            }
+        }
         iconView = null
-        overlayContainer = null
-        webView = null
         badgeCounter = null
-        overlayParams = null
         iconParams = null
     }
 
@@ -349,6 +363,12 @@ class FloatOverlayService : Service() {
         }
     }
 
+    private fun showToast(message: String) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
     }
@@ -360,6 +380,7 @@ class FloatOverlayService : Service() {
 
         const val ACTION_INCREMENT_BADGE = "com.floatoverlay.app.INCREMENT_BADGE"
         const val ACTION_CLEAR_BADGE = "com.floatoverlay.app.CLEAR_BADGE"
+        const val ACTION_RELOAD_OVERLAYS = "com.floatoverlay.app.RELOAD_OVERLAYS"
         const val EXTRA_CATEGORY = "category"
         const val EXTRA_AMOUNT = "amount"
 
@@ -375,6 +396,13 @@ class FloatOverlayService : Service() {
         fun clearBadge(context: Context) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
                 action = ACTION_CLEAR_BADGE
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun reloadOverlays(context: Context) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_RELOAD_OVERLAYS
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }

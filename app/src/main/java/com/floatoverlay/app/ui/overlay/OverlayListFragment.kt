@@ -8,6 +8,7 @@ import android.widget.Button
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.floatoverlay.app.FloatOverlayService
 import com.floatoverlay.app.OverlayRepository
 import com.floatoverlay.app.R
 import com.floatoverlay.app.model.OverlayConfig
@@ -45,6 +46,7 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
         addButton.setOnClickListener {
             OverlayEditDialog.show(requireContext()) { overlay ->
                 repository.addOrUpdate(overlay)
+                reloadOverlays()
                 refresh()
             }
         }
@@ -57,21 +59,28 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
 
     override fun onToggle(overlay: OverlayConfig, enabled: Boolean) {
         repository.addOrUpdate(overlay.copy(enabled = enabled))
+        reloadOverlays()
     }
 
     override fun onEdit(overlay: OverlayConfig) {
         OverlayEditDialog.show(requireContext(), overlay) { updated ->
             repository.addOrUpdate(updated)
+            reloadOverlays()
             refresh()
         }
     }
 
     override fun onDelete(overlay: OverlayConfig) {
         repository.delete(overlay.id)
+        reloadOverlays()
         refresh()
     }
 
     private fun refresh() {
         adapter.updateData(repository.getOverlays())
+    }
+
+    private fun reloadOverlays() {
+        FloatOverlayService.reloadOverlays(requireContext())
     }
 }
