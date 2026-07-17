@@ -285,6 +285,7 @@ class FloatOverlayService : Service() {
             layoutParams = FrameLayout.LayoutParams(dpToPx(20), dpToPx(20)).apply {
                 gravity = Gravity.BOTTOM or Gravity.END
             }
+            visibility = if (config.showResizeHandle) View.VISIBLE else View.GONE
         }
         setupResize(resizeHandle, params, config)
         container.addView(resizeHandle)

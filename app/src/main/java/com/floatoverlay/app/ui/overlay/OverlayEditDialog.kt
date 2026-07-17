@@ -23,6 +23,7 @@ object OverlayEditDialog {
         val urlInput = view.findViewById<TextInputEditText>(R.id.urlInput)
         val enabledSwitch = view.findViewById<MaterialSwitch>(R.id.enabledSwitch)
         val transparentSwitch = view.findViewById<MaterialSwitch>(R.id.transparentBackgroundSwitch)
+        val resizeHandleSwitch = view.findViewById<MaterialSwitch>(R.id.showResizeHandleSwitch)
         val widthInput = view.findViewById<TextInputEditText>(R.id.widthInput)
         val heightInput = view.findViewById<TextInputEditText>(R.id.heightInput)
         val cornerRadiusInput = view.findViewById<TextInputEditText>(R.id.cornerRadiusInput)
@@ -35,6 +36,7 @@ object OverlayEditDialog {
             urlInput.setText(it.url)
             enabledSwitch.isChecked = it.enabled
             transparentSwitch.isChecked = it.transparentBackground
+            resizeHandleSwitch.isChecked = it.showResizeHandle
             widthInput.setText(it.widthDp.toString())
             heightInput.setText(it.heightDp.toString())
             cornerRadiusInput.setText(it.cornerRadiusDp.toString())
@@ -77,6 +79,7 @@ object OverlayEditDialog {
                     url = url,
                     enabled = enabledSwitch.isChecked,
                     transparentBackground = transparentSwitch.isChecked,
+                    showResizeHandle = resizeHandleSwitch.isChecked,
                     widthDp = width,
                     heightDp = height,
                     cornerRadiusDp = radius,
@@ -88,6 +91,7 @@ object OverlayEditDialog {
                     url = url,
                     enabled = enabledSwitch.isChecked,
                     transparentBackground = transparentSwitch.isChecked,
+                    showResizeHandle = resizeHandleSwitch.isChecked,
                     widthDp = width,
                     heightDp = height,
                     cornerRadiusDp = radius,
