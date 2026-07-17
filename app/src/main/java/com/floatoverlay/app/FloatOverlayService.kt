@@ -147,7 +147,7 @@ class FloatOverlayService : Service() {
         badgeCounter = view.findViewById(R.id.badgeCounter)
         updateBadge()
 
-        setupDrag(view, params)
+        setupIconDrag(view, params)
         view.setOnClickListener {
             if (!isDragging) {
                 toggleOverlays()
@@ -189,12 +189,14 @@ class FloatOverlayService : Service() {
             val baseY = (iconParams?.y ?: dpToPx(100)) + dpToPx(56)
 
             configs.forEachIndexed { index, config ->
-                val params = createOverlayParams(config, baseX + dpToPx(index * 16), baseY + dpToPx(index * 16))
+                val x = if (config.posX >= 0) config.posX else baseX + dpToPx(index * 16)
+                val y = if (config.posY >= 0) config.posY else baseY + dpToPx(index * 16)
+                val params = createOverlayParams(config, x, y)
                 val container = createOverlayView(config, params)
                 overlayViews.add(container)
                 overlayParamsList.add(params)
                 windowManager?.addView(container, params)
-                LogStore.log(TAG, "Overlay #${index + 1} (${config.name}) added")
+                LogStore.log(TAG, "Overlay #${index + 1} (${config.name}) added at $x,$y")
             }
 
             isExpanded = true
@@ -290,7 +292,7 @@ class FloatOverlayService : Service() {
         setupResize(resizeHandle, params, config)
         container.addView(resizeHandle)
 
-        setupDrag(container, params)
+        setupDrag(container, params, config)
         return container
     }
 
@@ -335,7 +337,7 @@ class FloatOverlayService : Service() {
         return (px / resources.displayMetrics.density).toInt()
     }
 
-    private fun setupDrag(view: View, params: WindowManager.LayoutParams) {
+    private fun setupIconDrag(view: View, params: WindowManager.LayoutParams) {
         view.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
@@ -359,6 +361,42 @@ class FloatOverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!isDragging) {
+                        view.performClick()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun setupDrag(view: View, params: WindowManager.LayoutParams, config: OverlayConfig) {
+        view.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    isDragging = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - initialTouchX).toInt()
+                    val dy = (event.rawY - initialTouchY).toInt()
+                    if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) {
+                        isDragging = true
+                    }
+                    params.x = initialX + dx
+                    params.y = initialY + dy
+                    windowManager?.updateViewLayout(view, params)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (isDragging) {
+                        repository.addOrUpdate(config.copy(posX = params.x, posY = params.y))
+                        LogStore.log(TAG, "Saved position for ${config.name}: ${params.x},${params.y}")
+                    } else {
                         view.performClick()
                     }
                     true
