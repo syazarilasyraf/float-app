@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.floatoverlay.app.OverlayContainer xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/overlayContainer"
     android:layout_width="240dp"
     android:layout_height="160dp"
-    android:background="@drawable/overlay_background"
-    tools:viewBindingIgnore="true">
+    android:background="@drawable/overlay_background">
 
     <WebView
         android:id="@+id/overlayWebView"
@@ -23,4 +22,4 @@
         android:contentDescription="Minimize"
         android:src="@android:drawable/arrow_down_float" />
 
-</com.floatoverlay.app.OverlayContainer>
+</FrameLayout>

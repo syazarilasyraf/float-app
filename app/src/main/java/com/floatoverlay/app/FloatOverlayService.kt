@@ -19,7 +19,7 @@ import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.TextView
-import com.floatoverlay.app.OverlayContainer
+
 import androidx.core.app.NotificationCompat
 import com.floatoverlay.app.model.OverlayConfig
 
@@ -122,8 +122,8 @@ class FloatOverlayService : Service() {
         windowManager = windowManager ?: getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         val params = WindowManager.LayoutParams(
-            dpToPx(56),
-            dpToPx(56),
+            dpToPx(44),
+            dpToPx(44),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
@@ -184,26 +184,16 @@ class FloatOverlayService : Service() {
         overlayParams = params
 
         val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
-        val container = inflater.inflate(R.layout.floating_overlay, null) as OverlayContainer
+        val container = inflater.inflate(R.layout.floating_overlay, null) as FrameLayout
         overlayContainer = container
         webView = container.findViewById(R.id.overlayWebView)
         val minimizeButton = container.findViewById<ImageButton>(R.id.minimizeButton)
 
         applyConfigToView(config)
         setupWebView(config)
+        setupDrag(container, params)
 
-        container.dragStartListener = {
-            initialX = params.x
-            initialY = params.y
-        }
-
-        container.dragMoveListener = { dx, dy ->
-            params.x = initialX + dx
-            params.y = initialY + dy
-            windowManager?.updateViewLayout(container, params)
-        }
-
-        container.clickListener = {
+        container.setOnClickListener {
             // Reserved for future interaction
         }
 
