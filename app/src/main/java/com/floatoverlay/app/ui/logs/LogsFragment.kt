@@ -15,7 +15,7 @@ class LogsFragment : Fragment() {
     private lateinit var logText: TextView
     private lateinit var clearButton: Button
 
-    private val logListener = {
+    private val logListener: () -> Unit = {
         activity?.runOnUiThread {
             refreshLogs()
         }
