@@ -18,6 +18,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -287,6 +288,8 @@ class FloatOverlayService : Service() {
         webView.settings.domStorageEnabled = true
         webView.settings.useWideViewPort = true
         webView.settings.loadWithOverviewMode = true
+        webView.settings.mediaPlaybackRequiresUserGesture = false
+        webView.webChromeClient = WebChromeClient()
         webView.setBackgroundColor(0x00000000)
 
         if (config.url.isNotBlank()) {
