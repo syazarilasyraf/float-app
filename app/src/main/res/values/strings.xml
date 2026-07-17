@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Float Overlay</string>
+    <string name="overlay_permission_required">Display over other apps permission is required.</string>
+    <string name="grant_permission">Grant Permission</string>
+    <string name="start_overlay">Start Overlay</string>
+    <string name="stop_overlay">Stop Overlay</string>
+    <string name="overlay_running">Overlay is running</string>
+    <string name="overlay_running_desc">Tap to open the app</string>
+    <string name="overlay_channel_name">Overlay Service</string>
+</resources>

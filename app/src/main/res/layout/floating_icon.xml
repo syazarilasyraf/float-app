@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/floatingIconRoot"
+    android:layout_width="56dp"
+    android:layout_height="56dp"
+    android:background="@drawable/floating_icon_background">
+
+    <ImageView
+        android:id="@+id/floatingIconImage"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="center"
+        android:contentDescription="Overlay"
+        android:src="@drawable/ic_overlay" />
+
+    <TextView
+        android:id="@+id/badgeCounter"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="2dp"
+        android:background="@drawable/badge_background"
+        android:gravity="center"
+        android:text="0"
+        android:textColor="@color/white"
+        android:textSize="11sp"
+        android:visibility="gone" />
+
+</FrameLayout>
