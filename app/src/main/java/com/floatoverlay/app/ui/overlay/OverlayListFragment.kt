@@ -58,12 +58,14 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
     }
 
     override fun onToggle(overlay: OverlayConfig, enabled: Boolean) {
-        repository.addOrUpdate(overlay.copy(enabled = enabled))
+        val latest = repository.getOverlay(overlay.id) ?: overlay
+        repository.addOrUpdate(latest.copy(enabled = enabled))
         reloadOverlays()
     }
 
     override fun onEdit(overlay: OverlayConfig) {
-        OverlayEditDialog.show(requireContext(), overlay) { updated ->
+        val latest = repository.getOverlay(overlay.id) ?: overlay
+        OverlayEditDialog.show(requireContext(), latest) { updated ->
             repository.addOrUpdate(updated)
             reloadOverlays()
             refresh()
