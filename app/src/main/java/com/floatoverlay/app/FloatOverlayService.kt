@@ -10,6 +10,10 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.os.Looper
+import android.util.Log
+import android.widget.Toast
+import android.os.Handler
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -154,58 +158,69 @@ class FloatOverlayService : Service() {
     }
 
     private fun expandOverlay() {
-        if (overlayView != null) {
-            overlayView?.visibility = View.VISIBLE
+        try {
+            if (overlayView != null) {
+                overlayView?.visibility = View.VISIBLE
+                isExpanded = true
+                iconView?.visibility = View.GONE
+                clearBadge()
+                return
+            }
+
+            currentConfig = repository.getEnabledOverlays().firstOrNull()
+            val config = currentConfig
+            val width = config?.widthDp ?: 240
+            val height = config?.heightDp ?: 160
+
+            val params = WindowManager.LayoutParams(
+                dpToPx(width),
+                dpToPx(height),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else
+                    WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = iconParams?.x ?: dpToPx(16)
+                y = (iconParams?.y ?: dpToPx(100)) + dpToPx(64)
+            }
+            overlayParams = params
+
+            val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+            val container = inflater.inflate(R.layout.floating_overlay, null) as FrameLayout
+            overlayContainer = container
+            webView = container.findViewById(R.id.overlayWebView)
+            val minimizeButton = container.findViewById<ImageButton>(R.id.minimizeButton)
+
+            applyConfigToView(config)
+            setupWebView(config)
+            setupDrag(container, params)
+
+            container.setOnClickListener {
+                // Reserved for future interaction
+            }
+
+            minimizeButton.setOnClickListener {
+                minimizeOverlay()
+            }
+
+            overlayView = container
+            windowManager?.addView(container, params)
             isExpanded = true
             iconView?.visibility = View.GONE
             clearBadge()
-            return
+        } catch (e: Exception) {
+            Log.e(TAG, "expandOverlay failed", e)
+            showToast("Overlay error: ${e.message}")
         }
+    }
 
-        currentConfig = repository.getEnabledOverlays().firstOrNull()
-        val config = currentConfig
-        val width = config?.widthDp ?: 240
-        val height = config?.heightDp ?: 160
-
-        val params = WindowManager.LayoutParams(
-            dpToPx(width),
-            dpToPx(height),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = iconParams?.x ?: dpToPx(16)
-            y = (iconParams?.y ?: dpToPx(100)) + dpToPx(64)
+    private fun showToast(message: String) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
-        overlayParams = params
-
-        val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
-        val container = inflater.inflate(R.layout.floating_overlay, null) as FrameLayout
-        overlayContainer = container
-        webView = container.findViewById(R.id.overlayWebView)
-        val minimizeButton = container.findViewById<ImageButton>(R.id.minimizeButton)
-
-        applyConfigToView(config)
-        setupWebView(config)
-        setupDrag(container, params)
-
-        container.setOnClickListener {
-            // Reserved for future interaction
-        }
-
-        minimizeButton.setOnClickListener {
-            minimizeOverlay()
-        }
-
-        overlayView = container
-        windowManager?.addView(container, params)
-        isExpanded = true
-        iconView?.visibility = View.GONE
-        clearBadge()
     }
 
     private fun minimizeOverlay() {
@@ -313,6 +328,7 @@ class FloatOverlayService : Service() {
     }
 
     companion object {
+        private const val TAG = "FloatOverlayService"
         private const val CHANNEL_ID = "float_overlay_channel"
         private const val FOREGROUND_SERVICE_ID = 1
 
