@@ -9,7 +9,9 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.floatoverlay.app.ui.overlay.OverlayListFragment
+import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.tabs.TabLayout
+import com.google.android.material.tabs.TabLayoutMediator
 
 class MainActivity : AppCompatActivity() {
 
@@ -19,6 +21,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var stopOverlayButton: Button
     private lateinit var testDonationButton: Button
     private lateinit var testChatButton: Button
+    private lateinit var viewPager: ViewPager2
+    private lateinit var tabLayout: TabLayout
 
     private val overlaySettingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -36,6 +40,8 @@ class MainActivity : AppCompatActivity() {
         stopOverlayButton = findViewById(R.id.stopOverlayButton)
         testDonationButton = findViewById(R.id.testDonationButton)
         testChatButton = findViewById(R.id.testChatButton)
+        viewPager = findViewById(R.id.viewPager)
+        tabLayout = findViewById(R.id.tabLayout)
 
         grantPermissionButton.setOnClickListener {
             requestOverlayPermission()
@@ -65,11 +71,14 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        if (savedInstanceState == null) {
-            supportFragmentManager.beginTransaction()
-                .replace(R.id.fragmentContainer, OverlayListFragment())
-                .commit()
-        }
+        viewPager.adapter = MainPagerAdapter(this)
+        TabLayoutMediator(tabLayout, viewPager) { tab, position ->
+            tab.text = when (position) {
+                0 -> "Overlays"
+                1 -> "Logs"
+                else -> ""
+            }
+        }.attach()
 
         updatePermissionState()
     }
@@ -100,11 +109,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startOverlayService() {
+        LogStore.log("MainActivity", "Starting overlay service")
         val intent = Intent(this, FloatOverlayService::class.java)
         ContextCompat.startForegroundService(this, intent)
     }
 
     private fun stopOverlayService() {
+        LogStore.log("MainActivity", "Stopping overlay service")
         stopService(Intent(this, FloatOverlayService::class.java))
     }
 }

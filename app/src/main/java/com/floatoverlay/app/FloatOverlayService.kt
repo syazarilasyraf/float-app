@@ -21,7 +21,6 @@ import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.TextView
 
 import androidx.core.app.NotificationCompat
@@ -54,6 +53,7 @@ class FloatOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        LogStore.log(TAG, "Service onCreate")
         repository = OverlayRepository(this)
         counter = NotificationCounter(repository)
         startForeground()
@@ -123,6 +123,7 @@ class FloatOverlayService : Service() {
     }
 
     private fun showIcon() {
+        LogStore.log(TAG, "Showing floating icon")
         windowManager = windowManager ?: getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         val params = WindowManager.LayoutParams(
@@ -158,8 +159,10 @@ class FloatOverlayService : Service() {
     }
 
     private fun expandOverlay() {
+        LogStore.log(TAG, "expandOverlay called")
         try {
             if (overlayView != null) {
+                LogStore.log(TAG, "Overlay already exists, showing it")
                 overlayView?.visibility = View.VISIBLE
                 isExpanded = true
                 iconView?.visibility = View.GONE
@@ -171,6 +174,7 @@ class FloatOverlayService : Service() {
             val config = currentConfig
             val width = config?.widthDp ?: 240
             val height = config?.heightDp ?: 160
+            LogStore.log(TAG, "Building overlay size ${width}x${height} dp, url=${config?.url}")
 
             val params = WindowManager.LayoutParams(
                 dpToPx(width),
@@ -188,30 +192,49 @@ class FloatOverlayService : Service() {
             }
             overlayParams = params
 
-            val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
-            val container = inflater.inflate(R.layout.floating_overlay, null) as FrameLayout
+            val container = FrameLayout(this)
             overlayContainer = container
-            webView = container.findViewById(R.id.overlayWebView)
-            val minimizeButton = container.findViewById<ImageButton>(R.id.minimizeButton)
+            LogStore.log(TAG, "FrameLayout created")
+
+            val webView = WebView(this)
+            this.webView = webView
+            webView.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ).apply {
+                topMargin = dpToPx(24)
+            }
+            container.addView(webView)
+            LogStore.log(TAG, "WebView added")
+
+            val minimizeButton = TextView(this).apply {
+                text = "−"
+                textSize = 24f
+                setTextColor(0xFFFFFFFF.toInt())
+                gravity = Gravity.CENTER
+                layoutParams = FrameLayout.LayoutParams(dpToPx(28), dpToPx(28)).apply {
+                    gravity = Gravity.TOP or Gravity.END
+                    setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
+                }
+                setOnClickListener {
+                    minimizeOverlay()
+                }
+            }
+            container.addView(minimizeButton)
+            LogStore.log(TAG, "Minimize button added")
 
             applyConfigToView(config)
             setupWebView(config)
             setupDrag(container, params)
 
-            container.setOnClickListener {
-                // Reserved for future interaction
-            }
-
-            minimizeButton.setOnClickListener {
-                minimizeOverlay()
-            }
-
             overlayView = container
             windowManager?.addView(container, params)
+            LogStore.log(TAG, "Overlay added to WindowManager")
             isExpanded = true
             iconView?.visibility = View.GONE
             clearBadge()
         } catch (e: Exception) {
+            LogStore.logError(TAG, "expandOverlay failed", e)
             Log.e(TAG, "expandOverlay failed", e)
             showToast("Overlay error: ${e.message}")
         }
@@ -224,6 +247,7 @@ class FloatOverlayService : Service() {
     }
 
     private fun minimizeOverlay() {
+        LogStore.log(TAG, "Minimizing overlay")
         overlayView?.visibility = View.GONE
         isExpanded = false
         iconView?.visibility = View.VISIBLE
@@ -237,12 +261,14 @@ class FloatOverlayService : Service() {
     }
 
     private fun setupWebView(config: OverlayConfig?) {
+        LogStore.log(TAG, "setupWebView called")
         webView?.apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             setBackgroundColor(0x00000000)
 
             if (config != null && config.url.isNotBlank()) {
+                LogStore.log(TAG, "Loading URL: ${config.url}")
                 loadUrl(config.url)
             } else {
                 loadDataWithBaseURL(
