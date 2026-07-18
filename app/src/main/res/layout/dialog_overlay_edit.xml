@@ -44,6 +44,34 @@
 
         </com.google.android.material.textfield.TextInputLayout>
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Overlay type" />
+
+        <Spinner
+            android:id="@+id/typeSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/assetNameLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="Asset name (e.g. stream_hud.html)"
+            android:visibility="gone">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/assetNameInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text" />
+
+        </com.google.android.material.textfield.TextInputLayout>
+
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/enabledSwitch"
             android:layout_width="match_parent"
@@ -81,6 +109,13 @@
             android:layout_marginTop="8dp"
             android:checked="true"
             android:text="Touch-through mode (taps pass through to game)" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/donationSourceSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Watch this overlay for donations" />
 
         <LinearLayout
             android:layout_width="match_parent"

@@ -20,6 +20,7 @@ import android.view.View
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -45,6 +46,9 @@ class FloatOverlayService : Service() {
     private var isDragging = false
 
     private var isExpanded = false
+
+    private val donationQueue = ArrayDeque<Pair<String, Double>>()
+    private val donationHandler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -78,6 +82,18 @@ class FloatOverlayService : Service() {
                 val id = intent.getStringExtra(EXTRA_OVERLAY_ID)
                 LogStore.log(TAG, "Reload overlays command received, id=$id")
                 reloadOverlays(id)
+            }
+            ACTION_DONATION -> {
+                val name = intent.getStringExtra(EXTRA_DONATION_NAME) ?: "Anonymous"
+                val amount = intent.getDoubleExtra(EXTRA_DONATION_AMOUNT, 0.0)
+                LogStore.log(TAG, "Donation received: $name RM$amount")
+                handleDonation(name, amount)
+            }
+            ACTION_APPLY_HUD_SETTINGS -> {
+                val goal = intent.getIntExtra(EXTRA_HUD_GOAL, 50)
+                val mpr = intent.getIntExtra(EXTRA_HUD_MPR, 5)
+                val cap = intent.getIntExtra(EXTRA_HUD_CAP, 3)
+                applyHudSettings(goal, mpr, cap)
             }
         }
         return START_STICKY
@@ -299,14 +315,48 @@ class FloatOverlayService : Service() {
         webView.settings.loadWithOverviewMode = true
         webView.settings.mediaPlaybackRequiresUserGesture = false
         webView.webChromeClient = WebChromeClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                val hud = container.findViewWithTag<WebView>("hudWebView")
+                if (hud == view) {
+                    val settings = repository.loadHudSettings()
+                    applyHudSettings(settings.goalRM, settings.minutesPerRM, settings.capHours)
+                }
+                if (config.donationSource) {
+                    view?.evaluateJavascript(DONATION_DETECTION_JS, null)
+                    LogStore.log(TAG, "Injected donation detector into ${config.name}")
+                }
+            }
+        }
+        if (config.donationSource) {
+            webView.addJavascriptInterface(DonationBridge { name, amount ->
+                handleDonation(name, amount)
+            }, "FloatOverlayBridge")
+        }
         webView.setBackgroundColor(0x00000000)
 
-        if (config.url.isNotBlank()) {
-            LogStore.log(TAG, "Loading URL for ${config.name}: ${config.url}")
-            webView.loadUrl(config.url)
-        } else {
-            LogStore.log(TAG, "Loading sample HTML for ${config.name}")
-            webView.loadDataWithBaseURL(null, SAMPLE_OVERLAY_HTML, "text/html", "UTF-8", null)
+        webView.settings.allowFileAccess = true
+        webView.settings.allowContentAccess = true
+
+        if (config.overlayType == OverlayConfig.TYPE_LOCAL && config.assetName == "stream_hud.html") {
+            webView.tag = "hudWebView"
+        }
+
+        when {
+            config.overlayType == OverlayConfig.TYPE_LOCAL && config.assetName.isNotBlank() -> {
+                val path = "file:///android_asset/overlays/${config.assetName}"
+                LogStore.log(TAG, "Loading local asset for ${config.name}: $path")
+                webView.loadUrl(path)
+            }
+            config.url.isNotBlank() -> {
+                LogStore.log(TAG, "Loading URL for ${config.name}: ${config.url}")
+                webView.loadUrl(config.url)
+            }
+            else -> {
+                LogStore.log(TAG, "Loading sample HTML for ${config.name}")
+                webView.loadDataWithBaseURL(null, SAMPLE_OVERLAY_HTML, "text/html", "UTF-8", null)
+            }
         }
         container.addView(webView)
 
@@ -471,6 +521,45 @@ class FloatOverlayService : Service() {
         iconParams = null
     }
 
+    fun applyHudSettings(goalRM: Int, minutesPerRM: Int, capHours: Int) {
+        LogStore.log(TAG, "Applying HUD settings: goal=$goalRM, mpr=$minutesPerRM, cap=$capHours")
+        val js = "setGoal($goalRM); setMinutesPerRM($minutesPerRM); setCapHours($capHours);"
+        overlayViews.values.forEach { container ->
+            val webView = container.findViewWithTag<WebView>("hudWebView")
+            webView?.evaluateJavascript(js) { result ->
+                LogStore.log(TAG, "HUD settings result: $result")
+            }
+        }
+    }
+
+    private fun handleDonation(name: String, amount: Double) {
+        LogStore.log(TAG, "Queuing donation $name RM$amount")
+        donationQueue.addLast(Pair(name, amount))
+        processDonationQueue()
+    }
+
+    private fun processDonationQueue() {
+        if (donationQueue.isEmpty()) return
+        val (name, amount) = donationQueue.removeFirst()
+        LogStore.log(TAG, "Processing donation $name RM$amount")
+
+        val escapedName = name.replace("\\", "\\\\").replace("\"", "\\\"").replace("'", "\\'")
+        val js = "onDonation(\"$escapedName\", $amount)"
+
+        overlayViews.values.forEach { container ->
+            val webView = container.findViewWithTag<WebView>("hudWebView")
+            webView?.evaluateJavascript(js) { result ->
+                LogStore.log(TAG, "HUD donation result: $result")
+            }
+        }
+
+        incrementBadge(NotificationCounter.Category.DONATION, 1)
+
+        if (donationQueue.isNotEmpty()) {
+            donationHandler.postDelayed({ processDonationQueue() }, 500)
+        }
+    }
+
     private fun incrementBadge(category: NotificationCounter.Category, amount: Int) {
         counter.increment(category, amount)
         updateBadge()
@@ -528,9 +617,16 @@ class FloatOverlayService : Service() {
         const val ACTION_INCREMENT_BADGE = "com.floatoverlay.app.INCREMENT_BADGE"
         const val ACTION_CLEAR_BADGE = "com.floatoverlay.app.CLEAR_BADGE"
         const val ACTION_RELOAD_OVERLAYS = "com.floatoverlay.app.RELOAD_OVERLAYS"
+        const val ACTION_DONATION = "com.floatoverlay.app.DONATION"
+        const val ACTION_APPLY_HUD_SETTINGS = "com.floatoverlay.app.APPLY_HUD_SETTINGS"
         const val EXTRA_CATEGORY = "category"
         const val EXTRA_AMOUNT = "amount"
         const val EXTRA_OVERLAY_ID = "overlay_id"
+        const val EXTRA_DONATION_NAME = "donation_name"
+        const val EXTRA_DONATION_AMOUNT = "donation_amount"
+        const val EXTRA_HUD_GOAL = "hud_goal"
+        const val EXTRA_HUD_MPR = "hud_mpr"
+        const val EXTRA_HUD_CAP = "hud_cap"
 
         fun incrementBadge(context: Context, category: NotificationCounter.Category, amount: Int = 1) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
@@ -555,6 +651,52 @@ class FloatOverlayService : Service() {
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
+
+        fun applyHudSettings(context: Context, goalRM: Int, minutesPerRM: Int, capHours: Int) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_APPLY_HUD_SETTINGS
+                putExtra(EXTRA_HUD_GOAL, goalRM)
+                putExtra(EXTRA_HUD_MPR, minutesPerRM)
+                putExtra(EXTRA_HUD_CAP, capHours)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun triggerDonation(context: Context, name: String, amount: Double) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_DONATION
+                putExtra(EXTRA_DONATION_NAME, name)
+                putExtra(EXTRA_DONATION_AMOUNT, amount)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        private const val DONATION_DETECTION_JS = """
+            (function() {
+                if (window.__floatOverlayObserver) return;
+                const observer = new MutationObserver(function(mutations) {
+                    mutations.forEach(function(mutation) {
+                        mutation.addedNodes.forEach(function(node) {
+                            if (node.nodeType === 1) {
+                                const text = node.innerText || node.textContent || "";
+                                const match = text.match(/RM\\s?([\\d.,]+)/);
+                                if (match) {
+                                    const amount = parseFloat(match[1].replace(/,/g, ""));
+                                    let name = "Anonymous";
+                                    const nameMatch = text.match(/from\\s+([\\w\\s@_.-]+)/i) || text.match(/([\\w\\s@_.-]+)\\s+donated/i);
+                                    if (nameMatch) name = nameMatch[1].trim();
+                                    if (window.FloatOverlayBridge && amount > 0) {
+                                        window.FloatOverlayBridge.onDonation(name, amount);
+                                    }
+                                }
+                            }
+                        });
+                    });
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+                window.__floatOverlayObserver = true;
+            })();
+        """
 
         private const val SAMPLE_OVERLAY_HTML = """
             <!DOCTYPE html>
