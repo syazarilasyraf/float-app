@@ -19,13 +19,26 @@ android {
         viewBinding = true
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("float_overlay.keystore")
+            storePassword = "floatoverlay"
+            keyAlias = "floatoverlay"
+            keyPassword = "floatoverlay"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
