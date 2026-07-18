@@ -1,7 +1,9 @@
 package com.floatoverlay.app.ui.overlay
 
 import android.content.Context
+import android.util.DisplayMetrics
 import android.widget.SeekBar
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.floatoverlay.app.R
 import com.floatoverlay.app.model.OverlayConfig
@@ -28,10 +30,17 @@ object OverlayEditDialog {
         val touchThroughSwitch = view.findViewById<MaterialSwitch>(R.id.touchThroughSwitch)
         val widthInput = view.findViewById<TextInputEditText>(R.id.widthInput)
         val heightInput = view.findViewById<TextInputEditText>(R.id.heightInput)
+        val posXInput = view.findViewById<TextInputEditText>(R.id.posXInput)
+        val posYInput = view.findViewById<TextInputEditText>(R.id.posYInput)
+        val positionInfo = view.findViewById<TextView>(R.id.positionInfo)
         val cornerRadiusInput = view.findViewById<TextInputEditText>(R.id.cornerRadiusInput)
         val colorInput = view.findViewById<TextInputEditText>(R.id.colorInput)
         val opacitySeekBar = view.findViewById<SeekBar>(R.id.opacitySeekBar)
-        val opacityValue = view.findViewById<android.widget.TextView>(R.id.opacityValue)
+        val opacityValue = view.findViewById<TextView>(R.id.opacityValue)
+
+        val metrics = context.resources.displayMetrics
+        val screenWidth = metrics.widthPixels
+        val screenHeight = metrics.heightPixels
 
         overlay?.let {
             nameInput.setText(it.name)
@@ -47,6 +56,14 @@ object OverlayEditDialog {
             colorInput.setText(colorIntToHex(it.backgroundColor))
             opacitySeekBar.progress = it.opacityPercent
             opacityValue.text = "${it.opacityPercent}%"
+
+            val currentX = if (it.posXPercent >= 0f) (it.posXPercent * screenWidth).toInt() else 0
+            val currentY = if (it.posYPercent >= 0f) (it.posYPercent * screenHeight).toInt() else 0
+            val right = screenWidth - currentX - dpToPx(it.widthDp, metrics)
+            val bottom = screenHeight - currentY - dpToPx(it.heightDp, metrics)
+            positionInfo.text = "Left: ${currentX}px | Top: ${currentY}px | Right: ${right}px | Bottom: ${bottom}px"
+            posXInput.setText(currentX.toString())
+            posYInput.setText(currentY.toString())
         } ?: run {
             widthInput.setText("240")
             heightInput.setText("160")
@@ -54,6 +71,9 @@ object OverlayEditDialog {
             colorInput.setText("#CC000000")
             opacitySeekBar.progress = 100
             opacityValue.text = "100%"
+            positionInfo.text = "Left: 0 | Top: 0 | Right: 0 | Bottom: 0"
+            posXInput.setText("0")
+            posYInput.setText("0")
         }
 
         opacitySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -78,6 +98,11 @@ object OverlayEditDialog {
                 val opacity = opacitySeekBar.progress.coerceIn(0, 100)
                 val color = parseColorHex(colorInput.text.toString())
 
+                val xPx = posXInput.text.toString().toIntOrNull() ?: 0
+                val yPx = posYInput.text.toString().toIntOrNull() ?: 0
+                val xPercent = xPx.toFloat() / screenWidth
+                val yPercent = yPx.toFloat() / screenHeight
+
                 val config = overlay?.copy(
                     name = name,
                     url = url,
@@ -90,7 +115,9 @@ object OverlayEditDialog {
                     heightDp = height,
                     cornerRadiusDp = radius,
                     backgroundColor = color,
-                    opacityPercent = opacity
+                    opacityPercent = opacity,
+                    posXPercent = xPercent,
+                    posYPercent = yPercent
                 ) ?: OverlayConfig(
                     id = UUID.randomUUID().toString(),
                     name = name,
@@ -104,12 +131,18 @@ object OverlayEditDialog {
                     heightDp = height,
                     cornerRadiusDp = radius,
                     backgroundColor = color,
-                    opacityPercent = opacity
+                    opacityPercent = opacity,
+                    posXPercent = xPercent,
+                    posYPercent = yPercent
                 )
                 onSave(config)
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun dpToPx(dp: Int, metrics: DisplayMetrics): Int {
+        return (dp * metrics.density).toInt()
     }
 
     private fun colorIntToHex(color: Int): String {

@@ -374,7 +374,8 @@ class FloatOverlayService : Service() {
                 MotionEvent.ACTION_UP -> {
                     val newWidthDp = pxToDp(params.width).coerceIn(50, 1000)
                     val newHeightDp = pxToDp(params.height).coerceIn(50, 1000)
-                    repository.addOrUpdate(config.copy(widthDp = newWidthDp, heightDp = newHeightDp))
+                    val latest = repository.getOverlay(config.id) ?: config
+                    repository.addOrUpdate(latest.copy(widthDp = newWidthDp, heightDp = newHeightDp))
                     LogStore.log(TAG, "Resized ${config.name} to ${newWidthDp}x${newHeightDp} dp")
                     true
                 }
@@ -410,7 +411,8 @@ class FloatOverlayService : Service() {
                         val screenSize = getScreenSize()
                         val xPercent = params.x.toFloat() / screenSize.first
                         val yPercent = params.y.toFloat() / screenSize.second
-                        repository.addOrUpdate(config.copy(posXPercent = xPercent, posYPercent = yPercent))
+                        val latest = repository.getOverlay(config.id) ?: config
+                        repository.addOrUpdate(latest.copy(posXPercent = xPercent, posYPercent = yPercent))
                         LogStore.log(TAG, "Saved position for ${config.name}: ${xPercent},${yPercent}")
                     } else {
                         view.performClick()
