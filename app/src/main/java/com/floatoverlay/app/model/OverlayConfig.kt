@@ -14,10 +14,10 @@ data class OverlayConfig(
     val cornerRadiusDp: Int = 16,
     val transparentBackground: Boolean = false,
     val showResizeHandle: Boolean = true,
-    val posX: Int = -1,
-    val posY: Int = -1,
     val locked: Boolean = false,
-    val touchThrough: Boolean = true
+    val touchThrough: Boolean = true,
+    val posXPercent: Float = -1f,
+    val posYPercent: Float = -1f
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -32,10 +32,10 @@ data class OverlayConfig(
             put("cornerRadiusDp", cornerRadiusDp)
             put("transparentBackground", transparentBackground)
             put("showResizeHandle", showResizeHandle)
-            put("posX", posX)
-            put("posY", posY)
             put("locked", locked)
             put("touchThrough", touchThrough)
+            put("posXPercent", posXPercent)
+            put("posYPercent", posYPercent)
         }
     }
 
@@ -53,10 +53,10 @@ data class OverlayConfig(
                 cornerRadiusDp = json.optInt("cornerRadiusDp", 16),
                 transparentBackground = json.optBoolean("transparentBackground", false),
                 showResizeHandle = json.optBoolean("showResizeHandle", true),
-                posX = json.optInt("posX", -1),
-                posY = json.optInt("posY", -1),
                 locked = json.optBoolean("locked", false),
-                touchThrough = json.optBoolean("touchThrough", true)
+                touchThrough = json.optBoolean("touchThrough", true),
+                posXPercent = json.optDouble("posXPercent", -1.0).toFloat(),
+                posYPercent = json.optDouble("posYPercent", -1.0).toFloat()
             )
         }
     }

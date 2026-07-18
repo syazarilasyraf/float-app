@@ -179,19 +179,24 @@ class FloatOverlayService : Service() {
                 return
             }
 
-            val baseX = iconParams?.x ?: dpToPx(16)
-            val baseY = (iconParams?.y ?: dpToPx(100)) + dpToPx(56)
+            val screenSize = getScreenSize()
 
             configs.forEachIndexed { index, config ->
                 if (!overlayViews.containsKey(config.id)) {
-                    val x = if (config.posX >= 0) config.posX else baseX + dpToPx(index * 16)
-                    val y = if (config.posY >= 0) config.posY else baseY + dpToPx(index * 16)
+                    val x = percentToX(config.posXPercent, index, screenSize.first)
+                    val y = percentToY(config.posYPercent, index, screenSize.second)
                     val params = createOverlayParams(config, x, y)
                     val container = createOverlayView(config, params)
                     overlayViews[config.id] = container
                     overlayParams[config.id] = params
                     windowManager?.addView(container, params)
-                    LogStore.log(TAG, "Overlay (${config.name}) added at $x,$y")
+                    if (config.posXPercent < 0f || config.posYPercent < 0f) {
+                        val xPercent = params.x.toFloat() / screenSize.first
+                        val yPercent = params.y.toFloat() / screenSize.second
+                        repository.addOrUpdate(config.copy(posXPercent = xPercent, posYPercent = yPercent))
+                        LogStore.log(TAG, "Saved initial position for ${config.name}: $xPercent,$yPercent")
+                    }
+                    LogStore.log(TAG, "Overlay (${config.name}) added at $x,$y (${config.posXPercent},${config.posYPercent})")
                 } else {
                     overlayViews[config.id]?.visibility = View.VISIBLE
                     LogStore.log(TAG, "Overlay (${config.name}) already exists, showing")
@@ -220,14 +225,13 @@ class FloatOverlayService : Service() {
         try {
             val configs = repository.getEnabledOverlays().associateBy { it.id }
 
-            // Remove overlays that are no longer enabled or were changed (unless locked and not the changed one)
+            // Remove overlays that are no longer enabled or were explicitly changed
             val idsToRemove = overlayViews.keys.filter { id ->
                 val config = configs[id]
                 when {
                     config == null -> true // disabled/deleted
-                    changedId == null -> !config.locked // full reload, only remove unlocked
                     id == changedId -> true // this one changed, recreate it
-                    else -> false // leave others alone
+                    else -> false // never touch other overlays
                 }
             }
 
@@ -403,8 +407,11 @@ class FloatOverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (isDragging) {
-                        repository.addOrUpdate(config.copy(posX = params.x, posY = params.y))
-                        LogStore.log(TAG, "Saved position for ${config.name}: ${params.x},${params.y}")
+                        val screenSize = getScreenSize()
+                        val xPercent = params.x.toFloat() / screenSize.first
+                        val yPercent = params.y.toFloat() / screenSize.second
+                        repository.addOrUpdate(config.copy(posXPercent = xPercent, posYPercent = yPercent))
+                        LogStore.log(TAG, "Saved position for ${config.name}: ${xPercent},${yPercent}")
                     } else {
                         view.performClick()
                     }
@@ -488,6 +495,19 @@ class FloatOverlayService : Service() {
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun getScreenSize(): Pair<Int, Int> {
+        val metrics = resources.displayMetrics
+        return Pair(metrics.widthPixels, metrics.heightPixels)
+    }
+
+    private fun percentToX(percent: Float, index: Int, screenWidth: Int): Int {
+        return if (percent >= 0f) (percent * screenWidth).toInt() else dpToPx(16 + index * 16)
+    }
+
+    private fun percentToY(percent: Float, index: Int, screenHeight: Int): Int {
+        return if (percent >= 0f) (percent * screenHeight).toInt() else dpToPx(100 + index * 16)
     }
 
     private fun dpToPx(dp: Int): Int {
