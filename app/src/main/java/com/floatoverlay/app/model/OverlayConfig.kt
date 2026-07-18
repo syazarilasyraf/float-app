@@ -16,7 +16,8 @@ data class OverlayConfig(
     val showResizeHandle: Boolean = true,
     val posX: Int = -1,
     val posY: Int = -1,
-    val locked: Boolean = false
+    val locked: Boolean = false,
+    val touchThrough: Boolean = true
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -34,6 +35,7 @@ data class OverlayConfig(
             put("posX", posX)
             put("posY", posY)
             put("locked", locked)
+            put("touchThrough", touchThrough)
         }
     }
 
@@ -53,7 +55,8 @@ data class OverlayConfig(
                 showResizeHandle = json.optBoolean("showResizeHandle", true),
                 posX = json.optInt("posX", -1),
                 posY = json.optInt("posY", -1),
-                locked = json.optBoolean("locked", false)
+                locked = json.optBoolean("locked", false),
+                touchThrough = json.optBoolean("touchThrough", true)
             )
         }
     }

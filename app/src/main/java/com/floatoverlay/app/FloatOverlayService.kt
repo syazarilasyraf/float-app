@@ -257,6 +257,11 @@ class FloatOverlayService : Service() {
     }
 
     private fun createOverlayParams(config: OverlayConfig, x: Int, y: Int): WindowManager.LayoutParams {
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        if (config.touchThrough) {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
         return WindowManager.LayoutParams(
             dpToPx(config.widthDp.coerceIn(50, 1000)),
             dpToPx(config.heightDp.coerceIn(50, 1000)),
@@ -264,7 +269,7 @@ class FloatOverlayService : Service() {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
                 WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            flags,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -316,17 +321,24 @@ class FloatOverlayService : Service() {
         }
         container.addView(minimizeButton)
 
+        val isInteractive = !config.locked && !config.touchThrough
+        val showHandle = config.showResizeHandle && isInteractive
+
         val resizeHandle = View(this).apply {
             background = getDrawable(R.drawable.resize_handle)
-            layoutParams = FrameLayout.LayoutParams(dpToPx(20), dpToPx(20)).apply {
+            layoutParams = FrameLayout.LayoutParams(dpToPx(12), dpToPx(12)).apply {
                 gravity = Gravity.BOTTOM or Gravity.END
             }
-            visibility = if (config.showResizeHandle) View.VISIBLE else View.GONE
+            visibility = if (showHandle) View.VISIBLE else View.GONE
         }
-        setupResize(resizeHandle, params, config)
+        if (isInteractive) {
+            setupResize(resizeHandle, params, config)
+        }
         container.addView(resizeHandle)
 
-        setupDrag(container, params, config)
+        if (isInteractive) {
+            setupDrag(container, params, config)
+        }
         return container
     }
 

@@ -74,6 +74,14 @@
             android:layout_marginTop="8dp"
             android:text="Lock position/size" />
 
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/touchThroughSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:checked="true"
+            android:text="Touch-through mode (taps pass through to game)" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
