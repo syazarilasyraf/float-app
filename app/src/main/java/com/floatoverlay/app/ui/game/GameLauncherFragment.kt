@@ -8,7 +8,6 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.DisplayMetrics
-import java.lang.reflect.Method
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -29,7 +28,6 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
     private lateinit var adapter: PresetAdapter
     private lateinit var recyclerView: RecyclerView
     private lateinit var addButton: Button
-    private var reflectionAllowed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -125,78 +123,28 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
         LogStore.log("GameLauncher", "Resolved launch intent for $packageName")
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
 
-        val options = if (preset.isFullscreen) {
-            ActivityOptions.makeBasic()
+        val optionsBundle = if (preset.isFullscreen) {
+            ActivityOptions.makeBasic().toBundle()
         } else {
             val metrics = getScreenMetrics()
             val rect = computeRect(preset, metrics)
-            ActivityOptions.makeBasic().setLaunchBounds(rect).also {
-                requestFreeformWindowingMode(it)
+            val options = ActivityOptions.makeBasic().setLaunchBounds(rect)
+            val bundle = options.toBundle()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                bundle.putInt(KEY_WINDOWING_MODE, WINDOWING_MODE_FREEFORM)
+                LogStore.log("GameLauncher", "Set bundle key=$KEY_WINDOWING_MODE value=$WINDOWING_MODE_FREEFORM")
+            } else {
+                bundle.putInt(KEY_LAUNCH_STACK_ID, FREEFORM_WORKSPACE_STACK_ID)
+                LogStore.log("GameLauncher", "Set bundle key=$KEY_LAUNCH_STACK_ID value=$FREEFORM_WORKSPACE_STACK_ID")
             }
+            bundle
         }
 
         LogStore.log(
             "GameLauncher",
             "Starting Clash Royale preset=${preset.name} fullscreen=${preset.isFullscreen}"
         )
-        startActivity(intent, options.toBundle())
-    }
-
-    private fun requestFreeformWindowingMode(options: ActivityOptions) {
-        allowReflection()
-
-        val methodName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            "setLaunchWindowingMode"
-        } else {
-            "setLaunchStackId"
-        }
-        val modeId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            WINDOWING_MODE_FREEFORM
-        } else {
-            FREEFORM_WORKSPACE_STACK_ID
-        }
-
-        try {
-            ActivityOptions::class.java
-                .getMethod(methodName, Int::class.javaPrimitiveType)
-                .invoke(options, modeId)
-            LogStore.log("GameLauncher", "$methodName($modeId) succeeded")
-        } catch (e: Exception) {
-            LogStore.log("GameLauncher", "$methodName unavailable: $e")
-        }
-    }
-
-    private fun allowReflection() {
-        if (reflectionAllowed) return
-        reflectionAllowed = true
-
-        try {
-            val forName = Class::class.java.getDeclaredMethod("forName", String::class.java)
-            val classArrayClass = arrayOf<Class<*>>().javaClass
-            val getDeclaredMethod = Class::class.java.getDeclaredMethod(
-                "getDeclaredMethod",
-                String::class.java,
-                classArrayClass
-            )
-
-            val vmRuntimeClass = forName.invoke(null, "dalvik.system.VMRuntime") as Class<*>
-            val getRuntime = getDeclaredMethod.invoke(
-                vmRuntimeClass,
-                "getRuntime",
-                arrayOf<Class<*>>()
-            ) as Method
-            val setHiddenApiExemptions = getDeclaredMethod.invoke(
-                vmRuntimeClass,
-                "setHiddenApiExemptions",
-                arrayOf<Class<*>>(Array<String>::class.java)
-            ) as Method
-
-            val vmRuntime = getRuntime.invoke(null)
-            setHiddenApiExemptions.invoke(vmRuntime, arrayOf("L"))
-            LogStore.log("GameLauncher", "allowReflection succeeded")
-        } catch (e: Throwable) {
-            LogStore.log("GameLauncher", "allowReflection failed: $e")
-        }
+        startActivity(intent, optionsBundle)
     }
 
     private fun resolveLaunchIntent(packageManager: PackageManager): Pair<Intent, String>? {
@@ -243,6 +191,8 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
     companion object {
         private const val WINDOWING_MODE_FREEFORM = 5
         private const val FREEFORM_WORKSPACE_STACK_ID = 2
+        private const val KEY_WINDOWING_MODE = "android.activity.windowingMode"
+        private const val KEY_LAUNCH_STACK_ID = "android.activity.launchStackId"
 
         private val CLASH_ROYALE_PACKAGES = listOf(
             "com.supercell.clashroyale",
