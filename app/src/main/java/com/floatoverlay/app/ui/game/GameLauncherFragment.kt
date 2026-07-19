@@ -5,8 +5,10 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
 import android.util.DisplayMetrics
+import java.lang.reflect.Method
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -27,6 +29,7 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
     private lateinit var adapter: PresetAdapter
     private lateinit var recyclerView: RecyclerView
     private lateinit var addButton: Button
+    private var reflectionAllowed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -140,13 +143,59 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
     }
 
     private fun requestFreeformWindowingMode(options: ActivityOptions) {
+        allowReflection()
+
+        val methodName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            "setLaunchWindowingMode"
+        } else {
+            "setLaunchStackId"
+        }
+        val modeId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WINDOWING_MODE_FREEFORM
+        } else {
+            FREEFORM_WORKSPACE_STACK_ID
+        }
+
         try {
             ActivityOptions::class.java
-                .getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
-                .invoke(options, WINDOWING_MODE_FREEFORM)
-            LogStore.log("GameLauncher", "setLaunchWindowingMode(freeform) succeeded")
+                .getMethod(methodName, Int::class.javaPrimitiveType)
+                .invoke(options, modeId)
+            LogStore.log("GameLauncher", "$methodName($modeId) succeeded")
         } catch (e: Exception) {
-            LogStore.log("GameLauncher", "setLaunchWindowingMode unavailable: $e")
+            LogStore.log("GameLauncher", "$methodName unavailable: $e")
+        }
+    }
+
+    private fun allowReflection() {
+        if (reflectionAllowed) return
+        reflectionAllowed = true
+
+        try {
+            val forName = Class::class.java.getDeclaredMethod("forName", String::class.java)
+            val classArrayClass = arrayOf<Class<*>>().javaClass
+            val getDeclaredMethod = Class::class.java.getDeclaredMethod(
+                "getDeclaredMethod",
+                String::class.java,
+                classArrayClass
+            )
+
+            val vmRuntimeClass = forName.invoke(null, "dalvik.system.VMRuntime") as Class<*>
+            val getRuntime = getDeclaredMethod.invoke(
+                vmRuntimeClass,
+                "getRuntime",
+                arrayOf<Class<*>>()
+            ) as Method
+            val setHiddenApiExemptions = getDeclaredMethod.invoke(
+                vmRuntimeClass,
+                "setHiddenApiExemptions",
+                arrayOf<Class<*>>(Array<String>::class.java)
+            ) as Method
+
+            val vmRuntime = getRuntime.invoke(null)
+            setHiddenApiExemptions.invoke(vmRuntime, arrayOf("L"))
+            LogStore.log("GameLauncher", "allowReflection succeeded")
+        } catch (e: Throwable) {
+            LogStore.log("GameLauncher", "allowReflection failed: $e")
         }
     }
 
@@ -193,6 +242,7 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
 
     companion object {
         private const val WINDOWING_MODE_FREEFORM = 5
+        private const val FREEFORM_WORKSPACE_STACK_ID = 2
 
         private val CLASH_ROYALE_PACKAGES = listOf(
             "com.supercell.clashroyale",
