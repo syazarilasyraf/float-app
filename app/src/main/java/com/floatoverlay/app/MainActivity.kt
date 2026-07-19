@@ -99,6 +99,7 @@ class MainActivity : AppCompatActivity() {
             tab.text = when (position) {
                 0 -> "Overlays"
                 1 -> "Logs"
+                2 -> "Game"
                 else -> ""
             }
         }.attach()
