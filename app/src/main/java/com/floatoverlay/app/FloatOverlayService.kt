@@ -140,8 +140,8 @@ class FloatOverlayService : Service() {
         windowManager = windowManager ?: getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         val params = WindowManager.LayoutParams(
-            dpToPx(44),
-            dpToPx(44),
+            dpToPx(36),
+            dpToPx(36),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
@@ -202,7 +202,7 @@ class FloatOverlayService : Service() {
             }
 
             isExpanded = true
-            iconView?.visibility = View.GONE
+            bringIconToFront()
             clearBadge()
         } catch (e: Exception) {
             LogStore.logError(TAG, "showOverlays failed", e)
@@ -215,7 +215,18 @@ class FloatOverlayService : Service() {
         LogStore.log(TAG, "Hiding overlays")
         overlayViews.values.forEach { it.visibility = View.GONE }
         isExpanded = false
-        iconView?.visibility = View.VISIBLE
+    }
+
+    private fun bringIconToFront() {
+        val view = iconView ?: return
+        val params = iconParams ?: return
+        try {
+            windowManager?.removeView(view)
+            windowManager?.addView(view, params)
+            LogStore.log(TAG, "Floating icon brought to front")
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "bringIconToFront failed", e)
+        }
     }
 
     private fun reloadOverlays(changedId: String?) {
@@ -244,6 +255,7 @@ class FloatOverlayService : Service() {
                 // Newly enabled overlay while already expanded
                 val screenSize = getScreenSize()
                 addOverlay(newConfig, screenSize)
+                bringIconToFront()
                 return
             }
 
@@ -363,7 +375,7 @@ class FloatOverlayService : Service() {
         }
         container.addView(minimizeButton)
 
-        val isInteractive = !config.locked && !config.touchThrough
+        val isInteractive = !config.touchThrough
         val showHandle = config.showResizeHandle && isInteractive
 
         val resizeHandle = View(this).apply {
@@ -452,8 +464,7 @@ class FloatOverlayService : Service() {
             LogStore.log(TAG, "Updated background for ${newConfig.name}")
         }
 
-        if (oldConfig.locked != newConfig.locked ||
-            oldConfig.touchThrough != newConfig.touchThrough ||
+        if (oldConfig.touchThrough != newConfig.touchThrough ||
             oldConfig.showResizeHandle != newConfig.showResizeHandle
         ) {
             updateInteractivity(container, params, newConfig)
@@ -474,7 +485,7 @@ class FloatOverlayService : Service() {
     }
 
     private fun updateInteractivity(container: FrameLayout, params: WindowManager.LayoutParams, config: OverlayConfig) {
-        val isInteractive = !config.locked && !config.touchThrough
+        val isInteractive = !config.touchThrough
 
         params.flags = if (config.touchThrough) {
             params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE

@@ -27,7 +27,6 @@ object OverlayEditDialog {
         val enabledSwitch = view.findViewById<MaterialSwitch>(R.id.enabledSwitch)
         val transparentSwitch = view.findViewById<MaterialSwitch>(R.id.transparentBackgroundSwitch)
         val resizeHandleSwitch = view.findViewById<MaterialSwitch>(R.id.showResizeHandleSwitch)
-        val lockSwitch = view.findViewById<MaterialSwitch>(R.id.lockOverlaySwitch)
         val touchThroughSwitch = view.findViewById<MaterialSwitch>(R.id.touchThroughSwitch)
         val widthInput = view.findViewById<TextInputEditText>(R.id.widthInput)
         val heightInput = view.findViewById<TextInputEditText>(R.id.heightInput)
@@ -40,6 +39,7 @@ object OverlayEditDialog {
         val opacityValue = view.findViewById<TextView>(R.id.opacityValue)
         val scaleSeekBar = view.findViewById<SeekBar>(R.id.scaleSeekBar)
         val scaleValue = view.findViewById<TextView>(R.id.scaleValue)
+        val scaleInput = view.findViewById<TextInputEditText>(R.id.scaleInput)
         val offsetXInput = view.findViewById<TextInputEditText>(R.id.offsetXInput)
         val offsetYInput = view.findViewById<TextInputEditText>(R.id.offsetYInput)
 
@@ -53,7 +53,6 @@ object OverlayEditDialog {
             enabledSwitch.isChecked = it.enabled
             transparentSwitch.isChecked = it.transparentBackground
             resizeHandleSwitch.isChecked = it.showResizeHandle
-            lockSwitch.isChecked = it.locked
             touchThroughSwitch.isChecked = it.touchThrough
             widthInput.setText(it.widthDp.toString())
             heightInput.setText(it.heightDp.toString())
@@ -63,6 +62,7 @@ object OverlayEditDialog {
             opacityValue.text = "${it.opacityPercent}%"
             scaleSeekBar.progress = (it.scalePercent - 25).coerceIn(0, 275)
             scaleValue.text = "${it.scalePercent}%"
+            scaleInput.setText(it.scalePercent.toString())
             offsetXInput.setText(it.contentOffsetX.toString())
             offsetYInput.setText(it.contentOffsetY.toString())
 
@@ -82,6 +82,8 @@ object OverlayEditDialog {
             opacityValue.text = "100%"
             scaleSeekBar.progress = 75
             scaleValue.text = "100%"
+            scaleInput.setText("100")
+            touchThroughSwitch.isChecked = true
             offsetXInput.setText("0")
             offsetYInput.setText("0")
             positionInfo.text = "Left: 0 | Top: 0 | Right: 0 | Bottom: 0"
@@ -100,12 +102,25 @@ object OverlayEditDialog {
 
         scaleSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                scaleValue.text = "${(progress + 25).coerceIn(25, 300)}%"
+                val value = (progress + 25).coerceIn(25, 300)
+                scaleValue.text = "$value%"
+                if (fromUser) {
+                    scaleInput.setText(value.toString())
+                }
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+
+        scaleInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                val value = scaleInput.text.toString().toIntOrNull()?.coerceIn(25, 300) ?: 100
+                scaleInput.setText(value.toString())
+                scaleValue.text = "$value%"
+                scaleSeekBar.progress = (value - 25).coerceIn(0, 275)
+            }
+        }
 
         val dialog = AlertDialog.Builder(context)
             .setView(view)
@@ -126,7 +141,8 @@ object OverlayEditDialog {
                 val height = heightInput.text.toString().toIntOrNull()?.coerceIn(50, 1000) ?: 160
                 val radius = cornerRadiusInput.text.toString().toIntOrNull()?.coerceIn(0, 200) ?: 16
                 val opacity = opacitySeekBar.progress.coerceIn(0, 100)
-                val scale = (scaleSeekBar.progress + 25).coerceIn(25, 300)
+                val scale = scaleInput.text.toString().toIntOrNull()?.coerceIn(25, 300)
+                    ?: (scaleSeekBar.progress + 25).coerceIn(25, 300)
                 val offsetX = offsetXInput.text.toString().toIntOrNull() ?: 0
                 val offsetY = offsetYInput.text.toString().toIntOrNull() ?: 0
                 val color = parseColorHex(colorInput.text.toString())
@@ -142,7 +158,6 @@ object OverlayEditDialog {
                     enabled = enabledSwitch.isChecked,
                     transparentBackground = transparentSwitch.isChecked,
                     showResizeHandle = resizeHandleSwitch.isChecked,
-                    locked = lockSwitch.isChecked,
                     touchThrough = touchThroughSwitch.isChecked,
                     widthDp = width,
                     heightDp = height,
@@ -161,7 +176,6 @@ object OverlayEditDialog {
                     enabled = enabledSwitch.isChecked,
                     transparentBackground = transparentSwitch.isChecked,
                     showResizeHandle = resizeHandleSwitch.isChecked,
-                    locked = lockSwitch.isChecked,
                     touchThrough = touchThroughSwitch.isChecked,
                     widthDp = width,
                     heightDp = height,

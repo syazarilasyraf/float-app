@@ -20,10 +20,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var grantPermissionButton: Button
     private lateinit var startOverlayButton: Button
     private lateinit var stopOverlayButton: Button
-    private lateinit var testDonationButton: Button
-    private lateinit var testChatButton: Button
     private lateinit var autoShowSwitch: MaterialSwitch
-    private lateinit var lockAllButton: Button
     private lateinit var viewPager: ViewPager2
     private lateinit var tabLayout: TabLayout
 
@@ -43,10 +40,7 @@ class MainActivity : AppCompatActivity() {
         grantPermissionButton = findViewById(R.id.grantPermissionButton)
         startOverlayButton = findViewById(R.id.startOverlayButton)
         stopOverlayButton = findViewById(R.id.stopOverlayButton)
-        testDonationButton = findViewById(R.id.testDonationButton)
-        testChatButton = findViewById(R.id.testChatButton)
         autoShowSwitch = findViewById(R.id.autoShowSwitch)
-        lockAllButton = findViewById(R.id.lockAllButton)
         viewPager = findViewById(R.id.viewPager)
         tabLayout = findViewById(R.id.tabLayout)
 
@@ -54,16 +48,6 @@ class MainActivity : AppCompatActivity() {
         autoShowSwitch.isChecked = repository.isAutoShowEnabled()
         autoShowSwitch.setOnCheckedChangeListener { _, isChecked ->
             repository.setAutoShowEnabled(isChecked)
-        }
-
-        updateLockAllButton()
-        lockAllButton.setOnClickListener {
-            val lock = !repository.areAllLocked()
-            repository.setAllLocked(lock)
-            repository.getOverlays().forEach { overlay ->
-                FloatOverlayService.reloadOverlays(this, overlay.id)
-            }
-            updateLockAllButton()
         }
 
         grantPermissionButton.setOnClickListener {
@@ -76,22 +60,6 @@ class MainActivity : AppCompatActivity() {
 
         stopOverlayButton.setOnClickListener {
             stopOverlayService()
-        }
-
-        testDonationButton.setOnClickListener {
-            FloatOverlayService.incrementBadge(
-                this,
-                NotificationCounter.Category.DONATION,
-                1
-            )
-        }
-
-        testChatButton.setOnClickListener {
-            FloatOverlayService.incrementBadge(
-                this,
-                NotificationCounter.Category.CHAT,
-                1
-            )
         }
 
         viewPager.adapter = MainPagerAdapter(this)
@@ -110,12 +78,6 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updatePermissionState()
-        updateLockAllButton()
-    }
-
-    private fun updateLockAllButton() {
-        val allLocked = repository.areAllLocked()
-        lockAllButton.text = if (allLocked) "Unlock All" else "Lock All"
     }
 
     private fun updatePermissionState() {

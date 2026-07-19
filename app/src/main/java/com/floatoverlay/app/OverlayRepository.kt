@@ -71,16 +71,6 @@ class OverlayRepository(context: Context) {
         prefs.edit().putBoolean(KEY_AUTO_SHOW, enabled).apply()
     }
 
-    fun setAllLocked(locked: Boolean) {
-        val overlays = getOverlays().map { it.copy(locked = locked) }
-        saveOverlays(overlays)
-    }
-
-    fun areAllLocked(): Boolean {
-        val overlays = getOverlays()
-        return overlays.isNotEmpty() && overlays.all { it.locked }
-    }
-
     companion object {
         private const val PREFS_NAME = "FloatOverlayPrefs"
         private const val KEY_OVERLAYS = "overlays"
