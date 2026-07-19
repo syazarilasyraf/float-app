@@ -2,18 +2,13 @@ package com.floatoverlay.app.ui.overlay
 
 import android.content.Context
 import android.util.DisplayMetrics
-import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.SeekBar
-import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.materialswitch.MaterialSwitch
-import com.google.android.material.textfield.TextInputEditText
-import com.google.android.material.textfield.TextInputLayout
 import com.floatoverlay.app.R
 import com.floatoverlay.app.model.OverlayConfig
+import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.textfield.TextInputEditText
 import java.util.UUID
 
 object OverlayEditDialog {
@@ -28,15 +23,11 @@ object OverlayEditDialog {
 
         val nameInput = view.findViewById<TextInputEditText>(R.id.nameInput)
         val urlInput = view.findViewById<TextInputEditText>(R.id.urlInput)
-        val typeSpinner = view.findViewById<Spinner>(R.id.typeSpinner)
-        val assetNameLayout = view.findViewById<TextInputLayout>(R.id.assetNameLayout)
-        val assetNameInput = view.findViewById<TextInputEditText>(R.id.assetNameInput)
         val enabledSwitch = view.findViewById<MaterialSwitch>(R.id.enabledSwitch)
         val transparentSwitch = view.findViewById<MaterialSwitch>(R.id.transparentBackgroundSwitch)
         val resizeHandleSwitch = view.findViewById<MaterialSwitch>(R.id.showResizeHandleSwitch)
         val lockSwitch = view.findViewById<MaterialSwitch>(R.id.lockOverlaySwitch)
         val touchThroughSwitch = view.findViewById<MaterialSwitch>(R.id.touchThroughSwitch)
-        val donationSourceSwitch = view.findViewById<MaterialSwitch>(R.id.donationSourceSwitch)
         val widthInput = view.findViewById<TextInputEditText>(R.id.widthInput)
         val heightInput = view.findViewById<TextInputEditText>(R.id.heightInput)
         val posXInput = view.findViewById<TextInputEditText>(R.id.posXInput)
@@ -51,31 +42,14 @@ object OverlayEditDialog {
         val screenWidth = metrics.widthPixels
         val screenHeight = metrics.heightPixels
 
-        val typeAdapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, listOf("URL", "LOCAL"))
-        typeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        typeSpinner.adapter = typeAdapter
-
-        typeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, itemView: View?, position: Int, id: Long) {
-                val isLocal = position == 1
-                assetNameLayout.visibility = if (isLocal) View.VISIBLE else View.GONE
-                urlInput.isEnabled = !isLocal
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
         overlay?.let {
             nameInput.setText(it.name)
             urlInput.setText(it.url)
-            typeSpinner.setSelection(if (it.overlayType == OverlayConfig.TYPE_LOCAL) 1 else 0)
-            assetNameInput.setText(it.assetName)
-            assetNameLayout.visibility = if (it.overlayType == OverlayConfig.TYPE_LOCAL) View.VISIBLE else View.GONE
             enabledSwitch.isChecked = it.enabled
             transparentSwitch.isChecked = it.transparentBackground
             resizeHandleSwitch.isChecked = it.showResizeHandle
             lockSwitch.isChecked = it.locked
             touchThroughSwitch.isChecked = it.touchThrough
-            donationSourceSwitch.isChecked = it.donationSource
             widthInput.setText(it.widthDp.toString())
             heightInput.setText(it.heightDp.toString())
             cornerRadiusInput.setText(it.cornerRadiusDp.toString())
@@ -100,13 +74,13 @@ object OverlayEditDialog {
             positionInfo.text = "Left: 0 | Top: 0 | Right: 0 | Bottom: 0"
             posXInput.setText("0")
             posYInput.setText("0")
-            donationSourceSwitch.isChecked = false
         }
 
         opacitySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 opacityValue.text = "$progress%"
             }
+
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
@@ -116,13 +90,7 @@ object OverlayEditDialog {
             .setPositiveButton("Save") { _, _ ->
                 val name = nameInput.text.toString().trim()
                 val url = urlInput.text.toString().trim()
-                if (name.isEmpty()) return@setPositiveButton
-
-                val overlayType = if (typeSpinner.selectedItemPosition == 1) OverlayConfig.TYPE_LOCAL else OverlayConfig.TYPE_URL
-                val assetName = assetNameInput.text.toString().trim()
-                if (overlayType == OverlayConfig.TYPE_LOCAL && assetName.isEmpty()) {
-                    return@setPositiveButton
-                }
+                if (name.isEmpty() || url.isEmpty()) return@setPositiveButton
 
                 val width = widthInput.text.toString().toIntOrNull()?.coerceIn(50, 1000) ?: 240
                 val height = heightInput.text.toString().toIntOrNull()?.coerceIn(50, 1000) ?: 160
@@ -138,14 +106,11 @@ object OverlayEditDialog {
                 val config = overlay?.copy(
                     name = name,
                     url = url,
-                    overlayType = overlayType,
-                    assetName = assetName,
                     enabled = enabledSwitch.isChecked,
                     transparentBackground = transparentSwitch.isChecked,
                     showResizeHandle = resizeHandleSwitch.isChecked,
                     locked = lockSwitch.isChecked,
                     touchThrough = touchThroughSwitch.isChecked,
-                    donationSource = donationSourceSwitch.isChecked,
                     widthDp = width,
                     heightDp = height,
                     cornerRadiusDp = radius,
@@ -157,14 +122,11 @@ object OverlayEditDialog {
                     id = UUID.randomUUID().toString(),
                     name = name,
                     url = url,
-                    overlayType = overlayType,
-                    assetName = assetName,
                     enabled = enabledSwitch.isChecked,
                     transparentBackground = transparentSwitch.isChecked,
                     showResizeHandle = resizeHandleSwitch.isChecked,
                     locked = lockSwitch.isChecked,
                     touchThrough = touchThroughSwitch.isChecked,
-                    donationSource = donationSourceSwitch.isChecked,
                     widthDp = width,
                     heightDp = height,
                     cornerRadiusDp = radius,
