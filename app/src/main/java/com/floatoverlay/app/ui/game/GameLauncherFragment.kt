@@ -2,6 +2,8 @@ package com.floatoverlay.app.ui.game
 
 import android.app.ActivityOptions
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.Bundle
 import android.util.DisplayMetrics
@@ -14,6 +16,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.floatoverlay.app.LogStore
 import com.floatoverlay.app.PresetRepository
 import com.floatoverlay.app.R
 import com.floatoverlay.app.model.WindowPreset
@@ -103,16 +106,20 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
 
     private fun launchClashRoyale(preset: WindowPreset) {
         val packageManager = requireActivity().packageManager
-        val intent = packageManager.getLaunchIntentForPackage(CLASH_ROYALE_PACKAGE)
-        if (intent == null) {
-            Toast.makeText(
-                requireContext(),
-                "Clash Royale not installed",
-                Toast.LENGTH_SHORT
-            ).show()
+        val resolved = resolveLaunchIntent(packageManager)
+        if (resolved == null) {
+            val disabledPackage = findDisabledClashRoyale(packageManager)
+            val message = if (disabledPackage != null) {
+                "Clash Royale found but is disabled/hidden ($disabledPackage)"
+            } else {
+                "Clash Royale not installed"
+            }
+            Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
             return
         }
 
+        val (intent, packageName) = resolved
+        LogStore.log("GameLauncher", "Resolved launch intent for $packageName")
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
 
         val options = if (preset.isFullscreen) {
@@ -124,6 +131,30 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
         }
 
         startActivity(intent, options.toBundle())
+    }
+
+    private fun resolveLaunchIntent(packageManager: PackageManager): Pair<Intent, String>? {
+        for (packageName in CLASH_ROYALE_PACKAGES) {
+            val intent = packageManager.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                return Pair(intent, packageName)
+            }
+        }
+        return null
+    }
+
+    private fun findDisabledClashRoyale(packageManager: PackageManager): String? {
+        for (packageName in CLASH_ROYALE_PACKAGES) {
+            val info = try {
+                packageManager.getApplicationInfo(packageName, 0)
+            } catch (e: PackageManager.NameNotFoundException) {
+                null
+            }
+            if (info != null && !info.enabled) {
+                return packageName
+            }
+        }
+        return null
     }
 
     @Suppress("DEPRECATION")
@@ -144,6 +175,9 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
     }
 
     companion object {
-        private const val CLASH_ROYALE_PACKAGE = "com.supercell.clashroyale"
+        private val CLASH_ROYALE_PACKAGES = listOf(
+            "com.supercell.clashroyale",
+            "com.tencent.tmgp.supercell.clashroyale"
+        )
     }
 }
