@@ -38,6 +38,10 @@ object OverlayEditDialog {
         val colorInput = view.findViewById<TextInputEditText>(R.id.colorInput)
         val opacitySeekBar = view.findViewById<SeekBar>(R.id.opacitySeekBar)
         val opacityValue = view.findViewById<TextView>(R.id.opacityValue)
+        val scaleSeekBar = view.findViewById<SeekBar>(R.id.scaleSeekBar)
+        val scaleValue = view.findViewById<TextView>(R.id.scaleValue)
+        val offsetXInput = view.findViewById<TextInputEditText>(R.id.offsetXInput)
+        val offsetYInput = view.findViewById<TextInputEditText>(R.id.offsetYInput)
 
         val metrics = context.resources.displayMetrics
         val screenWidth = metrics.widthPixels
@@ -57,6 +61,10 @@ object OverlayEditDialog {
             colorInput.setText(colorIntToHex(it.backgroundColor))
             opacitySeekBar.progress = it.opacityPercent
             opacityValue.text = "${it.opacityPercent}%"
+            scaleSeekBar.progress = (it.scalePercent - 25).coerceIn(0, 275)
+            scaleValue.text = "${it.scalePercent}%"
+            offsetXInput.setText(it.contentOffsetX.toString())
+            offsetYInput.setText(it.contentOffsetY.toString())
 
             val currentX = if (it.posXPercent >= 0f) (it.posXPercent * screenWidth).toInt() else 0
             val currentY = if (it.posYPercent >= 0f) (it.posYPercent * screenHeight).toInt() else 0
@@ -72,6 +80,10 @@ object OverlayEditDialog {
             colorInput.setText("#CC000000")
             opacitySeekBar.progress = 100
             opacityValue.text = "100%"
+            scaleSeekBar.progress = 75
+            scaleValue.text = "100%"
+            offsetXInput.setText("0")
+            offsetYInput.setText("0")
             positionInfo.text = "Left: 0 | Top: 0 | Right: 0 | Bottom: 0"
             posXInput.setText("0")
             posYInput.setText("0")
@@ -80,6 +92,15 @@ object OverlayEditDialog {
         opacitySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 opacityValue.text = "$progress%"
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        scaleSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                scaleValue.text = "${(progress + 25).coerceIn(25, 300)}%"
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -105,6 +126,9 @@ object OverlayEditDialog {
                 val height = heightInput.text.toString().toIntOrNull()?.coerceIn(50, 1000) ?: 160
                 val radius = cornerRadiusInput.text.toString().toIntOrNull()?.coerceIn(0, 200) ?: 16
                 val opacity = opacitySeekBar.progress.coerceIn(0, 100)
+                val scale = (scaleSeekBar.progress + 25).coerceIn(25, 300)
+                val offsetX = offsetXInput.text.toString().toIntOrNull() ?: 0
+                val offsetY = offsetYInput.text.toString().toIntOrNull() ?: 0
                 val color = parseColorHex(colorInput.text.toString())
 
                 val xPx = posXInput.text.toString().toIntOrNull() ?: 0
@@ -125,6 +149,9 @@ object OverlayEditDialog {
                     cornerRadiusDp = radius,
                     backgroundColor = color,
                     opacityPercent = opacity,
+                    scalePercent = scale,
+                    contentOffsetX = offsetX,
+                    contentOffsetY = offsetY,
                     posXPercent = xPercent,
                     posYPercent = yPercent
                 ) ?: OverlayConfig(
@@ -141,6 +168,9 @@ object OverlayEditDialog {
                     cornerRadiusDp = radius,
                     backgroundColor = color,
                     opacityPercent = opacity,
+                    scalePercent = scale,
+                    contentOffsetX = offsetX,
+                    contentOffsetY = offsetY,
                     posXPercent = xPercent,
                     posYPercent = yPercent
                 )

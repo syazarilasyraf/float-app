@@ -325,7 +325,17 @@ class FloatOverlayService : Service() {
         webView.settings.loadWithOverviewMode = true
         webView.settings.mediaPlaybackRequiresUserGesture = false
         webView.webChromeClient = WebChromeClient()
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                val currentConfig = repository.getOverlay(config.id) ?: config
+                view?.let {
+                    applyZoom(it, currentConfig.scalePercent)
+                    applyOffset(it, currentConfig.contentOffsetX, currentConfig.contentOffsetY)
+                    LogStore.log(TAG, "Page finished for ${currentConfig.name}, applied zoom/offset")
+                }
+            }
+        }
         webView.setBackgroundColor(0x00000000)
 
         if (config.url.isNotBlank()) {
@@ -373,6 +383,19 @@ class FloatOverlayService : Service() {
             setupDrag(container, params, config)
         }
         return container
+    }
+
+    private fun applyZoom(webView: WebView, scalePercent: Int) {
+        webView.evaluateJavascript("document.body.style.zoom='${scalePercent.coerceIn(25, 300)}%'") { result ->
+            LogStore.log(TAG, "Zoom applied: $scalePercent%, result=$result")
+        }
+    }
+
+    private fun applyOffset(webView: WebView, x: Int, y: Int) {
+        webView.postDelayed({
+            webView.scrollTo(x.coerceAtLeast(0), y.coerceAtLeast(0))
+            LogStore.log(TAG, "Offset applied: $x,$y")
+        }, 300)
     }
 
     private fun addOverlay(config: OverlayConfig, screenSize: Pair<Int, Int>, index: Int = overlayViews.size): FrameLayout {
@@ -435,6 +458,18 @@ class FloatOverlayService : Service() {
         ) {
             updateInteractivity(container, params, newConfig)
             LogStore.log(TAG, "Updated interactivity for ${newConfig.name}")
+        }
+
+        if (oldConfig.scalePercent != newConfig.scalePercent ||
+            oldConfig.contentOffsetX != newConfig.contentOffsetX ||
+            oldConfig.contentOffsetY != newConfig.contentOffsetY
+        ) {
+            val webView = container.findViewWithTag<WebView>("overlayWebView")
+            webView?.let {
+                applyZoom(it, newConfig.scalePercent)
+                applyOffset(it, newConfig.contentOffsetX, newConfig.contentOffsetY)
+            }
+            LogStore.log(TAG, "Updated zoom/offset for ${newConfig.name}")
         }
     }
 

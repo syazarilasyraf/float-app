@@ -17,7 +17,10 @@ data class OverlayConfig(
     val locked: Boolean = false,
     val touchThrough: Boolean = true,
     val posXPercent: Float = -1f,
-    val posYPercent: Float = -1f
+    val posYPercent: Float = -1f,
+    val scalePercent: Int = 100,
+    val contentOffsetX: Int = 0,
+    val contentOffsetY: Int = 0
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -36,6 +39,9 @@ data class OverlayConfig(
             put("touchThrough", touchThrough)
             put("posXPercent", posXPercent)
             put("posYPercent", posYPercent)
+            put("scalePercent", scalePercent)
+            put("contentOffsetX", contentOffsetX)
+            put("contentOffsetY", contentOffsetY)
         }
     }
 
@@ -56,7 +62,10 @@ data class OverlayConfig(
                 locked = json.optBoolean("locked", false),
                 touchThrough = json.optBoolean("touchThrough", true),
                 posXPercent = json.optDouble("posXPercent", -1.0).toFloat(),
-                posYPercent = json.optDouble("posYPercent", -1.0).toFloat()
+                posYPercent = json.optDouble("posYPercent", -1.0).toFloat(),
+                scalePercent = json.optInt("scalePercent", 100),
+                contentOffsetX = json.optInt("contentOffsetX", 0),
+                contentOffsetY = json.optInt("contentOffsetY", 0)
             )
         }
     }

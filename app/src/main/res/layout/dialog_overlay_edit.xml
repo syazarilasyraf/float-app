@@ -93,12 +93,13 @@
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
                 android:layout_weight="1"
-                android:hint="Width (dp)">
+                android:hint="Crop width (dp)">
 
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/widthInput"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:hint="Visible window — drag the corner handle"
                     android:inputType="number" />
 
             </com.google.android.material.textfield.TextInputLayout>
@@ -107,12 +108,13 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Height (dp)">
+                android:hint="Crop height (dp)">
 
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/heightInput"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:hint="Visible window — drag the corner handle"
                     android:inputType="number" />
 
             </com.google.android.material.textfield.TextInputLayout>
@@ -220,6 +222,64 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:text="100%" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Content size (zoom)" />
+
+        <SeekBar
+            android:id="@+id/scaleSeekBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="275"
+            android:progress="75" />
+
+        <TextView
+            android:id="@+id/scaleValue"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="100%" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:hint="Content offset X (px)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/offsetXInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberSigned" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Content offset Y (px)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/offsetYInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberSigned" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+        </LinearLayout>
 
     </LinearLayout>
 </ScrollView>
