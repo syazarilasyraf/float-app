@@ -127,10 +127,27 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
         } else {
             val metrics = getScreenMetrics()
             val rect = computeRect(preset, metrics)
-            ActivityOptions.makeBasic().setLaunchBounds(rect)
+            ActivityOptions.makeBasic().setLaunchBounds(rect).also {
+                requestFreeformWindowingMode(it)
+            }
         }
 
+        LogStore.log(
+            "GameLauncher",
+            "Starting Clash Royale preset=${preset.name} fullscreen=${preset.isFullscreen}"
+        )
         startActivity(intent, options.toBundle())
+    }
+
+    private fun requestFreeformWindowingMode(options: ActivityOptions) {
+        try {
+            ActivityOptions::class.java
+                .getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+                .invoke(options, WINDOWING_MODE_FREEFORM)
+            LogStore.log("GameLauncher", "setLaunchWindowingMode(freeform) succeeded")
+        } catch (e: Exception) {
+            LogStore.log("GameLauncher", "setLaunchWindowingMode unavailable: $e")
+        }
     }
 
     private fun resolveLaunchIntent(packageManager: PackageManager): Pair<Intent, String>? {
@@ -175,6 +192,8 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
     }
 
     companion object {
+        private const val WINDOWING_MODE_FREEFORM = 5
+
         private val CLASH_ROYALE_PACKAGES = listOf(
             "com.supercell.clashroyale",
             "com.tencent.tmgp.supercell.clashroyale"
