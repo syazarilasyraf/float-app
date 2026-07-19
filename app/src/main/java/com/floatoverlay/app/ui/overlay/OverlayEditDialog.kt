@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.DisplayMetrics
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import com.floatoverlay.app.R
 import com.floatoverlay.app.model.OverlayConfig
@@ -85,12 +86,20 @@ object OverlayEditDialog {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        AlertDialog.Builder(context)
+        val dialog = AlertDialog.Builder(context)
             .setView(view)
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val name = nameInput.text.toString().trim()
                 val url = urlInput.text.toString().trim()
-                if (name.isEmpty() || url.isEmpty()) return@setPositiveButton
+                if (name.isEmpty() || url.isEmpty()) {
+                    Toast.makeText(context, "Name and URL are required", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
 
                 val width = widthInput.text.toString().toIntOrNull()?.coerceIn(50, 1000) ?: 240
                 val height = heightInput.text.toString().toIntOrNull()?.coerceIn(50, 1000) ?: 160
@@ -136,9 +145,10 @@ object OverlayEditDialog {
                     posYPercent = yPercent
                 )
                 onSave(config)
+                dialog.dismiss()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
+        dialog.show()
     }
 
     private fun dpToPx(dp: Int, metrics: DisplayMetrics): Int {

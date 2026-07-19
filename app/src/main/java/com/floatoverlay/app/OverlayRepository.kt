@@ -63,9 +63,28 @@ class OverlayRepository(context: Context) {
         return prefs.getString(KEY_COUNTER_STATE, "") ?: ""
     }
 
+    fun isAutoShowEnabled(): Boolean {
+        return prefs.getBoolean(KEY_AUTO_SHOW, true)
+    }
+
+    fun setAutoShowEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_SHOW, enabled).apply()
+    }
+
+    fun setAllLocked(locked: Boolean) {
+        val overlays = getOverlays().map { it.copy(locked = locked) }
+        saveOverlays(overlays)
+    }
+
+    fun areAllLocked(): Boolean {
+        val overlays = getOverlays()
+        return overlays.isNotEmpty() && overlays.all { it.locked }
+    }
+
     companion object {
         private const val PREFS_NAME = "FloatOverlayPrefs"
         private const val KEY_OVERLAYS = "overlays"
         private const val KEY_COUNTER_STATE = "counter_state"
+        private const val KEY_AUTO_SHOW = "auto_show_overlays"
     }
 }

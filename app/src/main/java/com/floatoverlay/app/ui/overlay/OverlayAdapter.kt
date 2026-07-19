@@ -19,12 +19,14 @@ class OverlayAdapter(
         fun onToggle(overlay: OverlayConfig, enabled: Boolean)
         fun onEdit(overlay: OverlayConfig)
         fun onDelete(overlay: OverlayConfig)
+        fun onRefresh(overlay: OverlayConfig)
     }
 
     inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val name: TextView = itemView.findViewById(R.id.overlayName)
         val url: TextView = itemView.findViewById(R.id.overlayUrl)
         val enabled: Switch = itemView.findViewById(R.id.overlayEnabled)
+        val refreshButton: ImageButton = itemView.findViewById(R.id.refreshOverlayButton)
         val editButton: ImageButton = itemView.findViewById(R.id.editOverlayButton)
         val deleteButton: ImageButton = itemView.findViewById(R.id.deleteOverlayButton)
     }
@@ -43,6 +45,10 @@ class OverlayAdapter(
 
         holder.enabled.setOnCheckedChangeListener { _, isChecked ->
             listener.onToggle(overlay, isChecked)
+        }
+
+        holder.refreshButton.setOnClickListener {
+            listener.onRefresh(overlay)
         }
 
         holder.editButton.setOnClickListener {

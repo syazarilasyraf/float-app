@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -73,9 +74,20 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
     }
 
     override fun onDelete(overlay: OverlayConfig) {
-        repository.delete(overlay.id)
-        reloadOverlays() // full reload to remove it
-        refresh()
+        AlertDialog.Builder(requireContext())
+            .setTitle("Delete overlay")
+            .setMessage("Are you sure you want to delete \"${overlay.name}\"?")
+            .setPositiveButton("Delete") { _, _ ->
+                repository.delete(overlay.id)
+                reloadOverlays() // full reload to remove it
+                refresh()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    override fun onRefresh(overlay: OverlayConfig) {
+        FloatOverlayService.refreshOverlay(requireContext(), overlay.id)
     }
 
     private fun refresh() {

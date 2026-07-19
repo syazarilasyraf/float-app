@@ -20,6 +20,7 @@ import android.view.View
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -36,6 +37,7 @@ class FloatOverlayService : Service() {
 
     private val overlayViews = mutableMapOf<String, FrameLayout>()
     private val overlayParams = mutableMapOf<String, WindowManager.LayoutParams>()
+    private val lastConfigs = mutableMapOf<String, OverlayConfig>()
     private var iconParams: WindowManager.LayoutParams? = null
 
     private var initialX = 0
@@ -55,6 +57,10 @@ class FloatOverlayService : Service() {
         counter = NotificationCounter(repository)
         startForeground()
         showIcon()
+        if (repository.isAutoShowEnabled() && repository.getEnabledOverlays().isNotEmpty()) {
+            LogStore.log(TAG, "Auto-showing overlays on start")
+            showOverlays()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -78,6 +84,11 @@ class FloatOverlayService : Service() {
                 val id = intent.getStringExtra(EXTRA_OVERLAY_ID)
                 LogStore.log(TAG, "Reload overlays command received, id=$id")
                 reloadOverlays(id)
+            }
+            ACTION_REFRESH_OVERLAY -> {
+                val id = intent.getStringExtra(EXTRA_OVERLAY_ID)
+                LogStore.log(TAG, "Refresh overlay command received, id=$id")
+                refreshOverlay(id)
             }
         }
         return START_STICKY
@@ -183,20 +194,7 @@ class FloatOverlayService : Service() {
 
             configs.forEachIndexed { index, config ->
                 if (!overlayViews.containsKey(config.id)) {
-                    val x = percentToX(config.posXPercent, index, screenSize.first)
-                    val y = percentToY(config.posYPercent, index, screenSize.second)
-                    val params = createOverlayParams(config, x, y)
-                    val container = createOverlayView(config, params)
-                    overlayViews[config.id] = container
-                    overlayParams[config.id] = params
-                    windowManager?.addView(container, params)
-                    if (config.posXPercent < 0f || config.posYPercent < 0f) {
-                        val xPercent = params.x.toFloat() / screenSize.first
-                        val yPercent = params.y.toFloat() / screenSize.second
-                        repository.addOrUpdate(config.copy(posXPercent = xPercent, posYPercent = yPercent))
-                        LogStore.log(TAG, "Saved initial position for ${config.name}: $xPercent,$yPercent")
-                    }
-                    LogStore.log(TAG, "Overlay (${config.name}) added at $x,$y (${config.posXPercent},${config.posYPercent})")
+                    addOverlay(config, screenSize, index)
                 } else {
                     overlayViews[config.id]?.visibility = View.VISIBLE
                     LogStore.log(TAG, "Overlay (${config.name}) already exists, showing")
@@ -225,27 +223,53 @@ class FloatOverlayService : Service() {
         try {
             val configs = repository.getEnabledOverlays().associateBy { it.id }
 
-            // Remove overlays that are no longer enabled or were explicitly changed
-            val idsToRemove = overlayViews.keys.filter { id ->
-                val config = configs[id]
-                when {
-                    config == null -> true // disabled/deleted
-                    id == changedId -> true // this one changed, recreate it
-                    else -> false // never touch other overlays
-                }
-            }
-
+            // Remove overlays that are no longer enabled or deleted
+            val idsToRemove = overlayViews.keys.filter { configs[it] == null }
             idsToRemove.forEach { id ->
                 removeOverlayView(id)
+                lastConfigs.remove(id)
             }
 
-            // Add or recreate needed overlays
-            if (isExpanded) {
+            if (!isExpanded) return
+
+            if (changedId == null) {
+                // Adding a new overlay or generic refresh: let showOverlays add any missing ones
                 showOverlays()
+                return
+            }
+
+            val newConfig = configs[changedId] ?: return
+            val container = overlayViews[changedId]
+            if (container == null) {
+                // Newly enabled overlay while already expanded
+                val screenSize = getScreenSize()
+                addOverlay(newConfig, screenSize)
+                return
+            }
+
+            val oldConfig = lastConfigs[changedId]
+            if (oldConfig == null || oldConfig.url != newConfig.url) {
+                LogStore.log(TAG, "URL changed for ${newConfig.name}, recreating overlay")
+                removeOverlayView(changedId)
+                lastConfigs.remove(changedId)
+                val screenSize = getScreenSize()
+                addOverlay(newConfig, screenSize)
+            } else {
+                LogStore.log(TAG, "Applying smart update to ${newConfig.name}")
+                applyOverlayChanges(container, overlayParams[changedId]!!, oldConfig, newConfig)
+                lastConfigs[changedId] = newConfig
             }
         } catch (e: Exception) {
             LogStore.logError(TAG, "reloadOverlays failed", e)
         }
+    }
+
+    private fun refreshOverlay(id: String?) {
+        if (id == null) return
+        val container = overlayViews[id] ?: return
+        val webView = container.findViewWithTag<WebView>("overlayWebView") ?: return
+        webView.reload()
+        LogStore.log(TAG, "Reloaded overlay $id")
     }
 
     private fun removeOverlayView(id: String) {
@@ -258,6 +282,7 @@ class FloatOverlayService : Service() {
         }
         overlayViews.remove(id)
         overlayParams.remove(id)
+        lastConfigs.remove(id)
     }
 
     private fun createOverlayParams(config: OverlayConfig, x: Int, y: Int): WindowManager.LayoutParams {
@@ -284,7 +309,8 @@ class FloatOverlayService : Service() {
 
     private fun createOverlayView(config: OverlayConfig, params: WindowManager.LayoutParams): FrameLayout {
         val container = FrameLayout(this)
-        container.background = OverlayBackgroundDrawable.fromConfig(config)
+        container.background = OverlayBackgroundDrawable.fromConfig(config, resources.displayMetrics.density)
+        container.alpha = config.opacityPercent / 100f
 
         val webView = WebView(this)
         webView.layoutParams = FrameLayout.LayoutParams(
@@ -299,6 +325,7 @@ class FloatOverlayService : Service() {
         webView.settings.loadWithOverviewMode = true
         webView.settings.mediaPlaybackRequiresUserGesture = false
         webView.webChromeClient = WebChromeClient()
+        webView.webViewClient = WebViewClient()
         webView.setBackgroundColor(0x00000000)
 
         if (config.url.isNotBlank()) {
@@ -308,6 +335,7 @@ class FloatOverlayService : Service() {
             LogStore.log(TAG, "Loading sample HTML for ${config.name}")
             webView.loadDataWithBaseURL(null, SAMPLE_OVERLAY_HTML, "text/html", "UTF-8", null)
         }
+        webView.tag = "overlayWebView"
         container.addView(webView)
 
         val minimizeButton = TextView(this).apply {
@@ -329,6 +357,7 @@ class FloatOverlayService : Service() {
         val showHandle = config.showResizeHandle && isInteractive
 
         val resizeHandle = View(this).apply {
+            tag = "resizeHandle"
             background = getDrawable(R.drawable.resize_handle)
             layoutParams = FrameLayout.LayoutParams(dpToPx(12), dpToPx(12)).apply {
                 gravity = Gravity.BOTTOM or Gravity.END
@@ -346,46 +375,88 @@ class FloatOverlayService : Service() {
         return container
     }
 
-    private fun setupResize(handle: View, params: WindowManager.LayoutParams, config: OverlayConfig) {
-        var startWidth = 0
-        var startHeight = 0
-        var startX = 0f
-        var startY = 0f
+    private fun addOverlay(config: OverlayConfig, screenSize: Pair<Int, Int>, index: Int = overlayViews.size): FrameLayout {
+        val x = percentToX(config.posXPercent, index, screenSize.first)
+        val y = percentToY(config.posYPercent, index, screenSize.second)
+        val params = createOverlayParams(config, x, y)
+        val container = createOverlayView(config, params)
+        overlayViews[config.id] = container
+        overlayParams[config.id] = params
+        windowManager?.addView(container, params)
+        if (config.posXPercent < 0f || config.posYPercent < 0f) {
+            val xPercent = params.x.toFloat() / screenSize.first
+            val yPercent = params.y.toFloat() / screenSize.second
+            repository.addOrUpdate(config.copy(posXPercent = xPercent, posYPercent = yPercent))
+            LogStore.log(TAG, "Saved initial position for ${config.name}: $xPercent,$yPercent")
+        }
+        lastConfigs[config.id] = config
+        LogStore.log(TAG, "Overlay (${config.name}) added at $x,$y (${config.posXPercent},${config.posYPercent})")
+        return container
+    }
 
-        handle.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    startWidth = params.width
-                    startHeight = params.height
-                    startX = event.rawX
-                    startY = event.rawY
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.rawX - startX).toInt()
-                    val dy = (event.rawY - startY).toInt()
-                    val newWidth = (startWidth + dx).coerceAtLeast(dpToPx(100))
-                    val newHeight = (startHeight + dy).coerceAtLeast(dpToPx(60))
-                    params.width = newWidth
-                    params.height = newHeight
-                    windowManager?.updateViewLayout(handle.parent as View, params)
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    val newWidthDp = pxToDp(params.width).coerceIn(50, 1000)
-                    val newHeightDp = pxToDp(params.height).coerceIn(50, 1000)
-                    val latest = repository.getOverlay(config.id) ?: config
-                    repository.addOrUpdate(latest.copy(widthDp = newWidthDp, heightDp = newHeightDp))
-                    LogStore.log(TAG, "Resized ${config.name} to ${newWidthDp}x${newHeightDp} dp")
-                    true
-                }
-                else -> false
-            }
+    private fun applyOverlayChanges(
+        container: FrameLayout,
+        params: WindowManager.LayoutParams,
+        oldConfig: OverlayConfig,
+        newConfig: OverlayConfig
+    ) {
+        val screenSize = getScreenSize()
+
+        if (oldConfig.widthDp != newConfig.widthDp || oldConfig.heightDp != newConfig.heightDp) {
+            params.width = dpToPx(newConfig.widthDp.coerceIn(50, 1000))
+            params.height = dpToPx(newConfig.heightDp.coerceIn(50, 1000))
+            windowManager?.updateViewLayout(container, params)
+            LogStore.log(TAG, "Updated size for ${newConfig.name}: ${newConfig.widthDp}x${newConfig.heightDp} dp")
+        }
+
+        if (oldConfig.posXPercent != newConfig.posXPercent || oldConfig.posYPercent != newConfig.posYPercent) {
+            params.x = percentToX(newConfig.posXPercent, overlayViews.size, screenSize.first)
+            params.y = percentToY(newConfig.posYPercent, overlayViews.size, screenSize.second)
+            windowManager?.updateViewLayout(container, params)
+            LogStore.log(TAG, "Updated position for ${newConfig.name}: ${params.x},${params.y}")
+        }
+
+        if (oldConfig.opacityPercent != newConfig.opacityPercent) {
+            container.alpha = newConfig.opacityPercent / 100f
+            LogStore.log(TAG, "Updated opacity for ${newConfig.name}: ${newConfig.opacityPercent}%")
+        }
+
+        if (oldConfig.backgroundColor != newConfig.backgroundColor ||
+            oldConfig.cornerRadiusDp != newConfig.cornerRadiusDp ||
+            oldConfig.transparentBackground != newConfig.transparentBackground
+        ) {
+            container.background = OverlayBackgroundDrawable.fromConfig(newConfig, resources.displayMetrics.density)
+            LogStore.log(TAG, "Updated background for ${newConfig.name}")
+        }
+
+        if (oldConfig.locked != newConfig.locked ||
+            oldConfig.touchThrough != newConfig.touchThrough ||
+            oldConfig.showResizeHandle != newConfig.showResizeHandle
+        ) {
+            updateInteractivity(container, params, newConfig)
+            LogStore.log(TAG, "Updated interactivity for ${newConfig.name}")
         }
     }
 
-    private fun setupDrag(view: View, params: WindowManager.LayoutParams, config: OverlayConfig) {
-        view.setOnTouchListener { _, event ->
+    private fun updateInteractivity(container: FrameLayout, params: WindowManager.LayoutParams, config: OverlayConfig) {
+        val isInteractive = !config.locked && !config.touchThrough
+
+        params.flags = if (config.touchThrough) {
+            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
+        windowManager?.updateViewLayout(container, params)
+
+        val resizeHandle = container.findViewWithTag<View>("resizeHandle")
+        resizeHandle?.visibility = if (config.showResizeHandle && isInteractive) View.VISIBLE else View.GONE
+
+        container.setOnTouchListener(if (isInteractive) setupDragListener(container, params, config) else null)
+        resizeHandle?.setOnTouchListener(if (isInteractive) setupResizeListener(resizeHandle, params, config) else null)
+    }
+
+    private fun setupDragListener(view: View, params: WindowManager.LayoutParams, config: OverlayConfig): View.OnTouchListener {
+        return View.OnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
@@ -422,6 +493,52 @@ class FloatOverlayService : Service() {
                 else -> false
             }
         }
+    }
+
+    private fun setupResizeListener(handle: View, params: WindowManager.LayoutParams, config: OverlayConfig): View.OnTouchListener {
+        var startWidth = 0
+        var startHeight = 0
+        var startX = 0f
+        var startY = 0f
+
+        return View.OnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startWidth = params.width
+                    startHeight = params.height
+                    startX = event.rawX
+                    startY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - startX).toInt()
+                    val dy = (event.rawY - startY).toInt()
+                    val newWidth = (startWidth + dx).coerceAtLeast(dpToPx(100))
+                    val newHeight = (startHeight + dy).coerceAtLeast(dpToPx(60))
+                    params.width = newWidth
+                    params.height = newHeight
+                    windowManager?.updateViewLayout(handle.parent as View, params)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val newWidthDp = pxToDp(params.width).coerceIn(50, 1000)
+                    val newHeightDp = pxToDp(params.height).coerceIn(50, 1000)
+                    val latest = repository.getOverlay(config.id) ?: config
+                    repository.addOrUpdate(latest.copy(widthDp = newWidthDp, heightDp = newHeightDp))
+                    LogStore.log(TAG, "Resized ${config.name} to ${newWidthDp}x${newHeightDp} dp")
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun setupResize(handle: View, params: WindowManager.LayoutParams, config: OverlayConfig) {
+        handle.setOnTouchListener(setupResizeListener(handle, params, config))
+    }
+
+    private fun setupDrag(view: View, params: WindowManager.LayoutParams, config: OverlayConfig) {
+        view.setOnTouchListener(setupDragListener(view, params, config))
     }
 
     private fun setupIconDrag(view: View, params: WindowManager.LayoutParams) {
@@ -528,6 +645,7 @@ class FloatOverlayService : Service() {
         const val ACTION_INCREMENT_BADGE = "com.floatoverlay.app.INCREMENT_BADGE"
         const val ACTION_CLEAR_BADGE = "com.floatoverlay.app.CLEAR_BADGE"
         const val ACTION_RELOAD_OVERLAYS = "com.floatoverlay.app.RELOAD_OVERLAYS"
+        const val ACTION_REFRESH_OVERLAY = "com.floatoverlay.app.REFRESH_OVERLAY"
         const val EXTRA_CATEGORY = "category"
         const val EXTRA_AMOUNT = "amount"
         const val EXTRA_OVERLAY_ID = "overlay_id"
@@ -551,6 +669,14 @@ class FloatOverlayService : Service() {
         fun reloadOverlays(context: Context, overlayId: String? = null) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
                 action = ACTION_RELOAD_OVERLAYS
+                putExtra(EXTRA_OVERLAY_ID, overlayId)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun refreshOverlay(context: Context, overlayId: String) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_REFRESH_OVERLAY
                 putExtra(EXTRA_OVERLAY_ID, overlayId)
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
