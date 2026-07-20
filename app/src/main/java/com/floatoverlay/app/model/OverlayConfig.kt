@@ -18,6 +18,7 @@ data class OverlayConfig(
     val posXPercent: Float = -1f,
     val posYPercent: Float = -1f,
     val scalePercent: Int = 100,
+    val zoomMode: String = "layout",
     val contentOffsetX: Int = 0,
     val contentOffsetY: Int = 0
 ) {
@@ -38,6 +39,7 @@ data class OverlayConfig(
             put("posXPercent", posXPercent)
             put("posYPercent", posYPercent)
             put("scalePercent", scalePercent)
+            put("zoomMode", zoomMode)
             put("contentOffsetX", contentOffsetX)
             put("contentOffsetY", contentOffsetY)
         }
@@ -61,6 +63,7 @@ data class OverlayConfig(
                 posXPercent = json.optDouble("posXPercent", -1.0).toFloat(),
                 posYPercent = json.optDouble("posYPercent", -1.0).toFloat(),
                 scalePercent = json.optInt("scalePercent", 100),
+                zoomMode = json.optString("zoomMode", "layout"),
                 contentOffsetX = json.optInt("contentOffsetX", 0),
                 contentOffsetY = json.optInt("contentOffsetY", 0)
             )

@@ -48,6 +48,9 @@ class FloatOverlayService : Service() {
 
     private var isExpanded = false
 
+    private val zoomHandler = Handler(Looper.getMainLooper())
+    private val pendingZoomRunnables = mutableMapOf<String, MutableList<Runnable>>()
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -285,6 +288,7 @@ class FloatOverlayService : Service() {
     }
 
     private fun removeOverlayView(id: String) {
+        cancelVisualZoomRetries(id)
         overlayViews[id]?.let {
             try {
                 windowManager?.removeView(it)
@@ -342,8 +346,9 @@ class FloatOverlayService : Service() {
                 super.onPageFinished(view, url)
                 val currentConfig = repository.getOverlay(config.id) ?: config
                 view?.let {
-                    applyZoom(it, currentConfig.scalePercent)
+                    applyZoom(it, currentConfig)
                     applyOffset(it, currentConfig.contentOffsetX, currentConfig.contentOffsetY)
+                    scheduleVisualZoomRetries(currentConfig, it)
                     LogStore.log(TAG, "Page finished for ${currentConfig.name}, applied zoom/offset")
                 }
             }
@@ -397,10 +402,39 @@ class FloatOverlayService : Service() {
         return container
     }
 
-    private fun applyZoom(webView: WebView, scalePercent: Int) {
-        webView.evaluateJavascript("document.body.style.zoom='${scalePercent.coerceIn(25, 300)}%'") { result ->
-            LogStore.log(TAG, "Zoom applied: $scalePercent%, result=$result")
+    private fun applyZoom(webView: WebView, config: OverlayConfig) {
+        val scale = config.scalePercent.coerceIn(25, 300) / 100f
+        val script = if (config.zoomMode == "visual") {
+            "document.body.style.zoom='';document.body.style.transformOrigin='0 0';document.body.style.transform='scale($scale)';"
+        } else {
+            "document.body.style.transform='';document.body.style.transformOrigin='';document.body.style.zoom='${config.scalePercent.coerceIn(25, 300)}%';"
         }
+        webView.evaluateJavascript(script) { result ->
+            LogStore.log(TAG, "Zoom applied mode=${config.zoomMode}, scale=${config.scalePercent}%, result=$result")
+        }
+    }
+
+    private fun scheduleVisualZoomRetries(config: OverlayConfig, webView: WebView) {
+        if (config.zoomMode != "visual") return
+        cancelVisualZoomRetries(config.id)
+        val list = mutableListOf<Runnable>()
+        pendingZoomRunnables[config.id] = list
+        val delays = listOf(0L, 1000L, 2000L, 4000L, 8000L)
+        delays.forEach { delay ->
+            val runnable = Runnable {
+                val latest = repository.getOverlay(config.id) ?: config
+                if (latest.zoomMode == "visual") {
+                    applyZoom(webView, latest)
+                }
+            }
+            list.add(runnable)
+            zoomHandler.postDelayed(runnable, delay)
+        }
+    }
+
+    private fun cancelVisualZoomRetries(id: String) {
+        pendingZoomRunnables[id]?.forEach { zoomHandler.removeCallbacks(it) }
+        pendingZoomRunnables.remove(id)
     }
 
     private fun applyOffset(webView: WebView, x: Int, y: Int) {
@@ -472,12 +506,13 @@ class FloatOverlayService : Service() {
         }
 
         if (oldConfig.scalePercent != newConfig.scalePercent ||
+            oldConfig.zoomMode != newConfig.zoomMode ||
             oldConfig.contentOffsetX != newConfig.contentOffsetX ||
             oldConfig.contentOffsetY != newConfig.contentOffsetY
         ) {
             val webView = container.findViewWithTag<WebView>("overlayWebView")
             webView?.let {
-                applyZoom(it, newConfig.scalePercent)
+                applyZoom(it, newConfig)
                 applyOffset(it, newConfig.contentOffsetX, newConfig.contentOffsetY)
             }
             LogStore.log(TAG, "Updated zoom/offset for ${newConfig.name}")

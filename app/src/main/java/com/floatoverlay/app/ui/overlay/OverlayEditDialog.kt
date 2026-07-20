@@ -2,6 +2,7 @@ package com.floatoverlay.app.ui.overlay
 
 import android.content.Context
 import android.util.DisplayMetrics
+import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -40,6 +41,7 @@ object OverlayEditDialog {
         val scaleSeekBar = view.findViewById<SeekBar>(R.id.scaleSeekBar)
         val scaleValue = view.findViewById<TextView>(R.id.scaleValue)
         val scaleInput = view.findViewById<TextInputEditText>(R.id.scaleInput)
+        val zoomModeGroup = view.findViewById<RadioGroup>(R.id.zoomModeGroup)
         val offsetXInput = view.findViewById<TextInputEditText>(R.id.offsetXInput)
         val offsetYInput = view.findViewById<TextInputEditText>(R.id.offsetYInput)
 
@@ -63,6 +65,7 @@ object OverlayEditDialog {
             scaleSeekBar.progress = (it.scalePercent - 25).coerceIn(0, 275)
             scaleValue.text = "${it.scalePercent}%"
             scaleInput.setText(it.scalePercent.toString())
+            zoomModeGroup.check(if (it.zoomMode == "visual") R.id.zoomModeVisual else R.id.zoomModeLayout)
             offsetXInput.setText(it.contentOffsetX.toString())
             offsetYInput.setText(it.contentOffsetY.toString())
 
@@ -143,6 +146,7 @@ object OverlayEditDialog {
                 val opacity = opacitySeekBar.progress.coerceIn(0, 100)
                 val scale = scaleInput.text.toString().toIntOrNull()?.coerceIn(25, 300)
                     ?: (scaleSeekBar.progress + 25).coerceIn(25, 300)
+                val zoomMode = if (zoomModeGroup.checkedRadioButtonId == R.id.zoomModeVisual) "visual" else "layout"
                 val offsetX = offsetXInput.text.toString().toIntOrNull() ?: 0
                 val offsetY = offsetYInput.text.toString().toIntOrNull() ?: 0
                 val color = parseColorHex(colorInput.text.toString())
@@ -165,6 +169,7 @@ object OverlayEditDialog {
                     backgroundColor = color,
                     opacityPercent = opacity,
                     scalePercent = scale,
+                    zoomMode = zoomMode,
                     contentOffsetX = offsetX,
                     contentOffsetY = offsetY,
                     posXPercent = xPercent,
@@ -183,6 +188,7 @@ object OverlayEditDialog {
                     backgroundColor = color,
                     opacityPercent = opacity,
                     scalePercent = scale,
+                    zoomMode = zoomMode,
                     contentOffsetX = offsetX,
                     contentOffsetY = offsetY,
                     posXPercent = xPercent,
