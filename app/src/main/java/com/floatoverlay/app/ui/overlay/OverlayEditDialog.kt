@@ -1,7 +1,14 @@
 package com.floatoverlay.app.ui.overlay
 
 import android.content.Context
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.DisplayMetrics
+import android.view.View
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
+import android.widget.LinearLayout
+import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.TextView
@@ -44,6 +51,28 @@ object OverlayEditDialog {
         val zoomModeGroup = view.findViewById<RadioGroup>(R.id.zoomModeGroup)
         val offsetXInput = view.findViewById<TextInputEditText>(R.id.offsetXInput)
         val offsetYInput = view.findViewById<TextInputEditText>(R.id.offsetYInput)
+        val zoomOffsetGroup = view.findViewById<LinearLayout>(R.id.zoomOffsetGroup)
+        val cameraSettingsGroup = view.findViewById<LinearLayout>(R.id.cameraSettingsGroup)
+        val cameraShapeGroup = view.findViewById<RadioGroup>(R.id.cameraShapeGroup)
+        val cameraFilterDropdown = view.findViewById<AutoCompleteTextView>(R.id.cameraFilterDropdown)
+
+        val filterOptions = listOf("normal", "mono", "sepia", "warm", "cool", "vivid", "fade")
+        val filterDisplayOptions = listOf("Normal", "Mono", "Sepia", "Warm", "Cool", "Vivid", "Fade")
+        val filterAdapter = ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, filterDisplayOptions)
+        cameraFilterDropdown.setAdapter(filterAdapter)
+        cameraFilterDropdown.setText(filterDisplayOptions[0], false)
+
+        fun isCameraUrl(url: String) = url.startsWith("camera://")
+
+        fun updateCameraUi(url: String) {
+            val isCamera = isCameraUrl(url)
+            cameraSettingsGroup.visibility = if (isCamera) View.VISIBLE else View.GONE
+            zoomOffsetGroup.isEnabled = !isCamera
+            val alpha = if (isCamera) 0.4f else 1f
+            for (i in 0 until zoomOffsetGroup.childCount) {
+                zoomOffsetGroup.getChildAt(i).alpha = alpha
+            }
+        }
 
         val metrics = context.resources.displayMetrics
         val screenWidth = metrics.widthPixels
@@ -69,6 +98,12 @@ object OverlayEditDialog {
             offsetXInput.setText(it.contentOffsetX.toString())
             offsetYInput.setText(it.contentOffsetY.toString())
 
+            cameraShapeGroup.check(if (it.cameraShape == "circle") R.id.cameraShapeCircle else R.id.cameraShapeSquare)
+            val filterIndex = filterOptions.indexOf(it.cameraFilter).coerceAtLeast(0)
+            cameraFilterDropdown.setText(filterDisplayOptions[filterIndex], false)
+
+            updateCameraUi(it.url)
+
             val currentX = if (it.posXPercent >= 0f) (it.posXPercent * screenWidth).toInt() else 0
             val currentY = if (it.posYPercent >= 0f) (it.posYPercent * screenHeight).toInt() else 0
             val right = screenWidth - currentX - dpToPx(it.widthDp, metrics)
@@ -92,7 +127,26 @@ object OverlayEditDialog {
             positionInfo.text = "Left: 0 | Top: 0 | Right: 0 | Bottom: 0"
             posXInput.setText("0")
             posYInput.setText("0")
+            updateCameraUi("")
         }
+
+        urlInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val url = s?.toString()?.trim() ?: ""
+                val wasCamera = isCameraUrl(urlInput.tag?.toString() ?: "")
+                val isCamera = isCameraUrl(url)
+                urlInput.tag = url
+                updateCameraUi(url)
+                if (isCamera && !wasCamera && overlay == null) {
+                    // Apply camera defaults for a new overlay
+                    widthInput.setText("140")
+                    heightInput.setText("140")
+                    cornerRadiusInput.setText("24")
+                }
+            }
+        })
 
         opacitySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -151,6 +205,11 @@ object OverlayEditDialog {
                 val offsetY = offsetYInput.text.toString().toIntOrNull() ?: 0
                 val color = parseColorHex(colorInput.text.toString())
 
+                val cameraShape = if (cameraShapeGroup.checkedRadioButtonId == R.id.cameraShapeCircle) "circle" else "square"
+                val selectedFilterDisplay = cameraFilterDropdown.text.toString()
+                val filterIndex = filterDisplayOptions.indexOf(selectedFilterDisplay).coerceAtLeast(0)
+                val cameraFilter = filterOptions[filterIndex]
+
                 val xPx = posXInput.text.toString().toIntOrNull() ?: 0
                 val yPx = posYInput.text.toString().toIntOrNull() ?: 0
                 val xPercent = xPx.toFloat() / screenWidth
@@ -173,7 +232,9 @@ object OverlayEditDialog {
                     contentOffsetX = offsetX,
                     contentOffsetY = offsetY,
                     posXPercent = xPercent,
-                    posYPercent = yPercent
+                    posYPercent = yPercent,
+                    cameraShape = cameraShape,
+                    cameraFilter = cameraFilter
                 ) ?: OverlayConfig(
                     id = UUID.randomUUID().toString(),
                     name = name,
@@ -192,7 +253,9 @@ object OverlayEditDialog {
                     contentOffsetX = offsetX,
                     contentOffsetY = offsetY,
                     posXPercent = xPercent,
-                    posYPercent = yPercent
+                    posYPercent = yPercent,
+                    cameraShape = cameraShape,
+                    cameraFilter = cameraFilter
                 )
                 onSave(config)
                 dialog.dismiss()

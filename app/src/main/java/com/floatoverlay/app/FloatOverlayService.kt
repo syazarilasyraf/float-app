@@ -1,5 +1,6 @@
 package com.floatoverlay.app
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,16 +8,23 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Outline
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -24,8 +32,17 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import com.floatoverlay.app.model.OverlayConfig
+import kotlin.math.min
 
 class FloatOverlayService : Service() {
 
@@ -39,6 +56,11 @@ class FloatOverlayService : Service() {
     private val overlayParams = mutableMapOf<String, WindowManager.LayoutParams>()
     private val lastConfigs = mutableMapOf<String, OverlayConfig>()
     private var iconParams: WindowManager.LayoutParams? = null
+
+    private var cameraProvider: ProcessCameraProvider? = null
+    private val cameraUseCases = mutableMapOf<String, Preview>()
+    private val serviceLifecycleOwner = ServiceLifecycleOwner()
+    private var skipCameraOverlays = false
 
     private var initialX = 0
     private var initialY = 0
@@ -58,6 +80,9 @@ class FloatOverlayService : Service() {
         LogStore.log(TAG, "Service onCreate")
         repository = OverlayRepository(this)
         counter = NotificationCounter(repository)
+        serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_CREATE)
+        serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_START)
+        serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_RESUME)
         startForeground()
         showIcon()
         if (repository.isAutoShowEnabled() && repository.getEnabledOverlays().isNotEmpty()) {
@@ -67,6 +92,7 @@ class FloatOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        skipCameraOverlays = intent?.getBooleanExtra(EXTRA_SKIP_CAMERA, false) ?: false
         when (intent?.action) {
             ACTION_INCREMENT_BADGE -> {
                 val categoryName = intent.getStringExtra(EXTRA_CATEGORY)
@@ -99,6 +125,16 @@ class FloatOverlayService : Service() {
 
     override fun onDestroy() {
         removeViews()
+        try {
+            cameraProvider?.unbindAll()
+            cameraProvider = null
+            cameraUseCases.clear()
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Camera unbind on destroy failed", e)
+        }
+        serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_PAUSE)
+        serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_STOP)
+        serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_DESTROY)
         super.onDestroy()
     }
 
@@ -194,8 +230,17 @@ class FloatOverlayService : Service() {
             }
 
             val screenSize = getScreenSize()
+            val hasCameraPermission = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
 
             configs.forEachIndexed { index, config ->
+                if (isCameraUrl(config.url) && (skipCameraOverlays || !hasCameraPermission)) {
+                    LogStore.log(TAG, "Skipping camera overlay (${config.name}) due to missing permission")
+                    showToast("Camera permission denied; skipping camera overlay")
+                    return@forEachIndexed
+                }
                 if (!overlayViews.containsKey(config.id)) {
                     addOverlay(config, screenSize, index)
                 } else {
@@ -289,6 +334,14 @@ class FloatOverlayService : Service() {
 
     private fun removeOverlayView(id: String) {
         cancelVisualZoomRetries(id)
+        cameraUseCases[id]?.let { useCase ->
+            try {
+                cameraProvider?.unbind(useCase)
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Camera unbind for $id failed", e)
+            }
+            cameraUseCases.remove(id)
+        }
         overlayViews[id]?.let {
             try {
                 windowManager?.removeView(it)
@@ -328,42 +381,57 @@ class FloatOverlayService : Service() {
         container.background = OverlayBackgroundDrawable.fromConfig(config, resources.displayMetrics.density)
         container.alpha = config.opacityPercent / 100f
 
-        val webView = WebView(this)
-        webView.layoutParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        ).apply {
-            topMargin = dpToPx(24)
-        }
-        webView.settings.javaScriptEnabled = true
-        webView.settings.domStorageEnabled = true
-        webView.settings.useWideViewPort = true
-        webView.settings.loadWithOverviewMode = true
-        webView.settings.mediaPlaybackRequiresUserGesture = false
-        webView.webChromeClient = WebChromeClient()
-        webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
-                val currentConfig = repository.getOverlay(config.id) ?: config
-                view?.let {
-                    applyZoom(it, currentConfig)
-                    applyOffset(it, currentConfig.contentOffsetX, currentConfig.contentOffsetY)
-                    scheduleVisualZoomRetries(currentConfig, it)
-                    LogStore.log(TAG, "Page finished for ${currentConfig.name}, applied zoom/offset")
+        if (isCameraUrl(config.url)) {
+            val previewView = PreviewView(this).apply {
+                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                tag = "overlayCameraView"
+            }
+            container.addView(previewView)
+            bindCamera(config.id, previewView, config.url)
+            applyCameraShape(container, config)
+            applyCameraFilter(container, config)
+        } else {
+            val webView = WebView(this)
+            webView.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ).apply {
+                topMargin = dpToPx(24)
+            }
+            webView.settings.javaScriptEnabled = true
+            webView.settings.domStorageEnabled = true
+            webView.settings.useWideViewPort = true
+            webView.settings.loadWithOverviewMode = true
+            webView.settings.mediaPlaybackRequiresUserGesture = false
+            webView.webChromeClient = WebChromeClient()
+            webView.webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    val currentConfig = repository.getOverlay(config.id) ?: config
+                    view?.let {
+                        applyZoom(it, currentConfig)
+                        applyOffset(it, currentConfig.contentOffsetX, currentConfig.contentOffsetY)
+                        scheduleVisualZoomRetries(currentConfig, it)
+                        LogStore.log(TAG, "Page finished for ${currentConfig.name}, applied zoom/offset")
+                    }
                 }
             }
-        }
-        webView.setBackgroundColor(0x00000000)
+            webView.setBackgroundColor(0x00000000)
 
-        if (config.url.isNotBlank()) {
-            LogStore.log(TAG, "Loading URL for ${config.name}: ${config.url}")
-            webView.loadUrl(config.url)
-        } else {
-            LogStore.log(TAG, "Loading sample HTML for ${config.name}")
-            webView.loadDataWithBaseURL(null, SAMPLE_OVERLAY_HTML, "text/html", "UTF-8", null)
+            if (config.url.isNotBlank()) {
+                LogStore.log(TAG, "Loading URL for ${config.name}: ${config.url}")
+                webView.loadUrl(config.url)
+            } else {
+                LogStore.log(TAG, "Loading sample HTML for ${config.name}")
+                webView.loadDataWithBaseURL(null, SAMPLE_OVERLAY_HTML, "text/html", "UTF-8", null)
+            }
+            webView.tag = "overlayWebView"
+            container.addView(webView)
         }
-        webView.tag = "overlayWebView"
-        container.addView(webView)
 
         val minimizeButton = TextView(this).apply {
             text = "−"
@@ -444,6 +512,123 @@ class FloatOverlayService : Service() {
         }, 300)
     }
 
+    private fun bindCamera(overlayId: String, previewView: PreviewView, url: String) {
+        val lensFacing = when (url) {
+            "camera://front" -> CameraSelector.LENS_FACING_FRONT
+            "camera://back" -> CameraSelector.LENS_FACING_BACK
+            else -> CameraSelector.LENS_FACING_BACK
+        }
+        previewView.scaleX = if (lensFacing == CameraSelector.LENS_FACING_FRONT) -1f else 1f
+
+        val providerFuture = ProcessCameraProvider.getInstance(this)
+        providerFuture.addListener({
+            try {
+                val provider = providerFuture.get()
+                cameraProvider = provider
+                cameraUseCases[overlayId]?.let { provider.unbind(it) }
+
+                val preview = Preview.Builder()
+                    .setTargetResolution(android.util.Size(1280, 720))
+                    .build()
+                    .also { it.setSurfaceProvider(previewView.surfaceProvider) }
+
+                val cameraSelector = CameraSelector.Builder()
+                    .requireLensFacing(lensFacing)
+                    .build()
+
+                provider.bindToLifecycle(serviceLifecycleOwner, cameraSelector, preview)
+                cameraUseCases[overlayId] = preview
+                LogStore.log(TAG, "Camera bound for overlay $overlayId lens=$lensFacing")
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Camera binding failed for $overlayId", e)
+                showToast("Camera error: ${e.message}")
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun applyCameraShape(container: FrameLayout, config: OverlayConfig) {
+        if (config.cameraShape == "circle") {
+            container.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    val size = min(view.width, view.height)
+                    val left = (view.width - size) / 2
+                    val top = (view.height - size) / 2
+                    outline.setOval(left, top, left + size, top + size)
+                }
+            }
+        } else {
+            container.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, dpToPx(config.cornerRadiusDp).toFloat())
+                }
+            }
+        }
+        container.clipToOutline = true
+    }
+
+    private fun applyCameraFilter(container: FrameLayout, config: OverlayConfig) {
+        val previewView = container.findViewWithTag<PreviewView>("overlayCameraView") ?: return
+        val paint = when (config.cameraFilter) {
+            "mono" -> Paint().apply {
+                colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+            }
+            "sepia" -> Paint().apply {
+                colorFilter = ColorMatrixColorFilter(floatArrayOf(
+                    0.393f, 0.769f, 0.189f, 0f, 0f,
+                    0.349f, 0.686f, 0.168f, 0f, 0f,
+                    0.272f, 0.534f, 0.131f, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+            }
+            "warm" -> Paint().apply {
+                colorFilter = ColorMatrixColorFilter(floatArrayOf(
+                    1.2f, 0f, 0f, 0f, 0f,
+                    0f, 1f, 0f, 0f, 0f,
+                    0f, 0f, 0.8f, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+            }
+            "cool" -> Paint().apply {
+                colorFilter = ColorMatrixColorFilter(floatArrayOf(
+                    0.8f, 0f, 0f, 0f, 0f,
+                    0f, 1f, 0f, 0f, 0f,
+                    0f, 0f, 1.2f, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+            }
+            "vivid" -> Paint().apply {
+                colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.6f) })
+            }
+            "fade" -> Paint().apply {
+                val saturationMatrix = ColorMatrix().apply { setSaturation(0.8f) }
+                val offsetMatrix = ColorMatrix(floatArrayOf(
+                    1f, 0f, 0f, 0f, 30f,
+                    0f, 1f, 0f, 0f, 30f,
+                    0f, 0f, 1f, 0f, 30f,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+                saturationMatrix.postConcat(offsetMatrix)
+                colorFilter = ColorMatrixColorFilter(saturationMatrix)
+            }
+            else -> null
+        }
+        if (paint != null) {
+            previewView.setLayerType(View.LAYER_TYPE_HARDWARE, paint)
+        } else {
+            previewView.setLayerType(View.LAYER_TYPE_NONE, null)
+        }
+    }
+
+    private fun flipCamera(overlayId: String) {
+        val config = repository.getOverlay(overlayId) ?: return
+        if (!isCameraUrl(config.url)) return
+        val newUrl = if (config.url == "camera://front") "camera://back" else "camera://front"
+        val updated = config.copy(url = newUrl)
+        repository.addOrUpdate(updated)
+        LogStore.log(TAG, "Flipped camera for ${config.name}: $newUrl")
+        reloadOverlays(overlayId)
+    }
+
     private fun addOverlay(config: OverlayConfig, screenSize: Pair<Int, Int>, index: Int = overlayViews.size): FrameLayout {
         val x = percentToX(config.posXPercent, index, screenSize.first)
         val y = percentToY(config.posYPercent, index, screenSize.second)
@@ -498,6 +683,19 @@ class FloatOverlayService : Service() {
             LogStore.log(TAG, "Updated background for ${newConfig.name}")
         }
 
+        if (isCameraUrl(newConfig.url)) {
+            if (oldConfig.cameraShape != newConfig.cameraShape ||
+                oldConfig.cornerRadiusDp != newConfig.cornerRadiusDp
+            ) {
+                applyCameraShape(container, newConfig)
+                LogStore.log(TAG, "Updated camera shape for ${newConfig.name}")
+            }
+            if (oldConfig.cameraFilter != newConfig.cameraFilter) {
+                applyCameraFilter(container, newConfig)
+                LogStore.log(TAG, "Updated camera filter for ${newConfig.name}")
+            }
+        }
+
         if (oldConfig.touchThrough != newConfig.touchThrough ||
             oldConfig.showResizeHandle != newConfig.showResizeHandle
         ) {
@@ -505,10 +703,11 @@ class FloatOverlayService : Service() {
             LogStore.log(TAG, "Updated interactivity for ${newConfig.name}")
         }
 
-        if (oldConfig.scalePercent != newConfig.scalePercent ||
+        if (!isCameraUrl(newConfig.url) &&
+            (oldConfig.scalePercent != newConfig.scalePercent ||
             oldConfig.zoomMode != newConfig.zoomMode ||
             oldConfig.contentOffsetX != newConfig.contentOffsetX ||
-            oldConfig.contentOffsetY != newConfig.contentOffsetY
+            oldConfig.contentOffsetY != newConfig.contentOffsetY)
         ) {
             val webView = container.findViewWithTag<WebView>("overlayWebView")
             webView?.let {
@@ -537,7 +736,19 @@ class FloatOverlayService : Service() {
     }
 
     private fun setupDragListener(view: View, params: WindowManager.LayoutParams, config: OverlayConfig): View.OnTouchListener {
+        var isCameraDoubleTap = false
+        val gestureDetector = if (isCameraUrl(config.url)) {
+            GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDoubleTap(e: MotionEvent): Boolean {
+                    isCameraDoubleTap = true
+                    flipCamera(config.id)
+                    return true
+                }
+            })
+        } else null
+
         return View.OnTouchListener { _, event ->
+            gestureDetector?.onTouchEvent(event)
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
@@ -545,9 +756,11 @@ class FloatOverlayService : Service() {
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     isDragging = false
+                    isCameraDoubleTap = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    if (isCameraDoubleTap) return@OnTouchListener true
                     val dx = (event.rawX - initialTouchX).toInt()
                     val dy = (event.rawY - initialTouchY).toInt()
                     if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) {
@@ -559,6 +772,10 @@ class FloatOverlayService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
+                    if (isCameraDoubleTap) {
+                        isCameraDoubleTap = false
+                        return@OnTouchListener true
+                    }
                     if (isDragging) {
                         val screenSize = getScreenSize()
                         val xPercent = params.x.toFloat() / screenSize.first
@@ -718,6 +935,16 @@ class FloatOverlayService : Service() {
         return (px / resources.displayMetrics.density).toInt()
     }
 
+    private fun isCameraUrl(url: String): Boolean = url.startsWith("camera://")
+
+    private inner class ServiceLifecycleOwner : LifecycleOwner {
+        private val registry = LifecycleRegistry(this)
+        override val lifecycle: Lifecycle = registry
+        fun handleEvent(event: Lifecycle.Event) {
+            registry.handleLifecycleEvent(event)
+        }
+    }
+
     companion object {
         private const val TAG = "FloatOverlayService"
         private const val CHANNEL_ID = "float_overlay_channel"
@@ -730,6 +957,7 @@ class FloatOverlayService : Service() {
         const val EXTRA_CATEGORY = "category"
         const val EXTRA_AMOUNT = "amount"
         const val EXTRA_OVERLAY_ID = "overlay_id"
+        const val EXTRA_SKIP_CAMERA = "skip_camera"
 
         fun incrementBadge(context: Context, category: NotificationCounter.Category, amount: Int = 1) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {

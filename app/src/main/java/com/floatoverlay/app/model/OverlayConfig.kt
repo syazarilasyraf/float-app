@@ -20,7 +20,9 @@ data class OverlayConfig(
     val scalePercent: Int = 100,
     val zoomMode: String = "layout",
     val contentOffsetX: Int = 0,
-    val contentOffsetY: Int = 0
+    val contentOffsetY: Int = 0,
+    val cameraShape: String = "square",
+    val cameraFilter: String = "normal"
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -42,6 +44,8 @@ data class OverlayConfig(
             put("zoomMode", zoomMode)
             put("contentOffsetX", contentOffsetX)
             put("contentOffsetY", contentOffsetY)
+            put("cameraShape", cameraShape)
+            put("cameraFilter", cameraFilter)
         }
     }
 
@@ -65,7 +69,9 @@ data class OverlayConfig(
                 scalePercent = json.optInt("scalePercent", 100),
                 zoomMode = json.optString("zoomMode", "layout"),
                 contentOffsetX = json.optInt("contentOffsetX", 0),
-                contentOffsetY = json.optInt("contentOffsetY", 0)
+                contentOffsetY = json.optInt("contentOffsetY", 0),
+                cameraShape = json.optString("cameraShape", "square"),
+                cameraFilter = json.optString("cameraFilter", "normal")
             )
         }
     }

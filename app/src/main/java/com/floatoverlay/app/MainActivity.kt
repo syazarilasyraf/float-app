@@ -1,11 +1,14 @@
 package com.floatoverlay.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -30,6 +33,17 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) {
         updatePermissionState()
+    }
+
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            startOverlayServiceInternal()
+        } else {
+            Toast.makeText(this, "Camera permission denied; camera overlays will be skipped", Toast.LENGTH_LONG).show()
+            startOverlayServiceInternal(skipCamera = true)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,8 +115,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startOverlayService() {
-        LogStore.log("MainActivity", "Starting overlay service")
-        val intent = Intent(this, FloatOverlayService::class.java)
+        val hasCameraOverlay = repository.getEnabledOverlays().any { it.url.startsWith("camera://") }
+        if (hasCameraOverlay) {
+            when (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)) {
+                PackageManager.PERMISSION_GRANTED -> startOverlayServiceInternal()
+                else -> cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
+        } else {
+            startOverlayServiceInternal()
+        }
+    }
+
+    private fun startOverlayServiceInternal(skipCamera: Boolean = false) {
+        LogStore.log("MainActivity", "Starting overlay service skipCamera=$skipCamera")
+        val intent = Intent(this, FloatOverlayService::class.java).apply {
+            putExtra(FloatOverlayService.EXTRA_SKIP_CAMERA, skipCamera)
+        }
         ContextCompat.startForegroundService(this, intent)
     }
 
