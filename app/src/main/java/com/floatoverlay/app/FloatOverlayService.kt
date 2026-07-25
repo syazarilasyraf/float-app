@@ -391,9 +391,10 @@ class FloatOverlayService : Service() {
                 tag = "overlayCameraView"
             }
             container.addView(previewView)
-            bindCamera(config.id, previewView, config.url)
+            bindCamera(config, previewView)
             applyCameraShape(container, config)
             applyCameraFilter(container, config)
+            applyCameraOpacity(container, config)
         } else {
             val webView = WebView(this)
             webView.layoutParams = FrameLayout.LayoutParams(
@@ -512,20 +513,27 @@ class FloatOverlayService : Service() {
         }, 300)
     }
 
-    private fun bindCamera(overlayId: String, previewView: PreviewView, url: String) {
-        val lensFacing = when (url) {
-            "camera://front" -> CameraSelector.LENS_FACING_FRONT
-            "camera://back" -> CameraSelector.LENS_FACING_BACK
-            else -> CameraSelector.LENS_FACING_BACK
-        }
-        previewView.scaleX = if (lensFacing == CameraSelector.LENS_FACING_FRONT) -1f else 1f
+    private fun getCameraLensFacing(url: String): Int = when (url) {
+        "camera://front" -> CameraSelector.LENS_FACING_FRONT
+        "camera://back" -> CameraSelector.LENS_FACING_BACK
+        else -> CameraSelector.LENS_FACING_BACK
+    }
+
+    private fun getCameraScaleX(url: String, flip: Boolean): Float {
+        val front = getCameraLensFacing(url) == CameraSelector.LENS_FACING_FRONT
+        return if (front && !flip) -1f else 1f
+    }
+
+    private fun bindCamera(config: OverlayConfig, previewView: PreviewView) {
+        val lensFacing = getCameraLensFacing(config.url)
+        previewView.scaleX = getCameraScaleX(config.url, config.cameraFlip)
 
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
             try {
                 val provider = providerFuture.get()
                 cameraProvider = provider
-                cameraUseCases[overlayId]?.let { provider.unbind(it) }
+                cameraUseCases[config.id]?.let { provider.unbind(it) }
 
                 val preview = Preview.Builder()
                     .setTargetResolution(android.util.Size(1280, 720))
@@ -537,13 +545,18 @@ class FloatOverlayService : Service() {
                     .build()
 
                 provider.bindToLifecycle(serviceLifecycleOwner, cameraSelector, preview)
-                cameraUseCases[overlayId] = preview
-                LogStore.log(TAG, "Camera bound for overlay $overlayId lens=$lensFacing")
+                cameraUseCases[config.id] = preview
+                LogStore.log(TAG, "Camera bound for overlay ${config.id} lens=$lensFacing flip=${config.cameraFlip}")
             } catch (e: Exception) {
-                LogStore.logError(TAG, "Camera binding failed for $overlayId", e)
+                LogStore.logError(TAG, "Camera binding failed for ${config.id}", e)
                 showToast("Camera error: ${e.message}")
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun applyCameraOpacity(container: FrameLayout, config: OverlayConfig) {
+        if (!isCameraUrl(config.url)) return
+        container.alpha = if (config.touchThrough) 1f else config.opacityPercent / 100f
     }
 
     private fun applyCameraShape(container: FrameLayout, config: OverlayConfig) {
@@ -693,6 +706,17 @@ class FloatOverlayService : Service() {
             if (oldConfig.cameraFilter != newConfig.cameraFilter) {
                 applyCameraFilter(container, newConfig)
                 LogStore.log(TAG, "Updated camera filter for ${newConfig.name}")
+            }
+            if (oldConfig.cameraFlip != newConfig.cameraFlip) {
+                val previewView = container.findViewWithTag<PreviewView>("overlayCameraView")
+                previewView?.scaleX = getCameraScaleX(newConfig.url, newConfig.cameraFlip)
+                LogStore.log(TAG, "Updated camera flip for ${newConfig.name}")
+            }
+            if (oldConfig.opacityPercent != newConfig.opacityPercent ||
+                oldConfig.touchThrough != newConfig.touchThrough
+            ) {
+                applyCameraOpacity(container, newConfig)
+                LogStore.log(TAG, "Updated camera opacity for ${newConfig.name}")
             }
         }
 

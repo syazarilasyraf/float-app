@@ -97,12 +97,20 @@
 
             </com.google.android.material.textfield.TextInputLayout>
 
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/cameraFlipSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:checked="true"
+                android:text="Flip camera (un-mirror preview)" />
+
             <TextView
                 android:id="@+id/cameraHint"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Camera overlay — zoom/offset don't apply; double-tap the overlay to flip camera"
+                android:text="Camera overlay — zoom/offset don't apply; double-tap the overlay to flip front/back camera"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="12sp" />
 

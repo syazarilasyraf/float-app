@@ -55,6 +55,7 @@ object OverlayEditDialog {
         val cameraSettingsGroup = view.findViewById<LinearLayout>(R.id.cameraSettingsGroup)
         val cameraShapeGroup = view.findViewById<RadioGroup>(R.id.cameraShapeGroup)
         val cameraFilterDropdown = view.findViewById<AutoCompleteTextView>(R.id.cameraFilterDropdown)
+        val cameraFlipSwitch = view.findViewById<MaterialSwitch>(R.id.cameraFlipSwitch)
 
         val filterOptions = listOf("normal", "mono", "sepia", "warm", "cool", "vivid", "fade")
         val filterDisplayOptions = listOf("Normal", "Mono", "Sepia", "Warm", "Cool", "Vivid", "Fade")
@@ -99,6 +100,7 @@ object OverlayEditDialog {
             offsetYInput.setText(it.contentOffsetY.toString())
 
             cameraShapeGroup.check(if (it.cameraShape == "circle") R.id.cameraShapeCircle else R.id.cameraShapeSquare)
+            cameraFlipSwitch.isChecked = it.cameraFlip
             val filterIndex = filterOptions.indexOf(it.cameraFilter).coerceAtLeast(0)
             cameraFilterDropdown.setText(filterDisplayOptions[filterIndex], false)
 
@@ -127,6 +129,7 @@ object OverlayEditDialog {
             positionInfo.text = "Left: 0 | Top: 0 | Right: 0 | Bottom: 0"
             posXInput.setText("0")
             posYInput.setText("0")
+            cameraFlipSwitch.isChecked = true
             updateCameraUi("")
         }
 
@@ -206,6 +209,7 @@ object OverlayEditDialog {
                 val color = parseColorHex(colorInput.text.toString())
 
                 val cameraShape = if (cameraShapeGroup.checkedRadioButtonId == R.id.cameraShapeCircle) "circle" else "square"
+                val cameraFlip = cameraFlipSwitch.isChecked
                 val selectedFilterDisplay = cameraFilterDropdown.text.toString()
                 val filterIndex = filterDisplayOptions.indexOf(selectedFilterDisplay).coerceAtLeast(0)
                 val cameraFilter = filterOptions[filterIndex]
@@ -234,7 +238,8 @@ object OverlayEditDialog {
                     posXPercent = xPercent,
                     posYPercent = yPercent,
                     cameraShape = cameraShape,
-                    cameraFilter = cameraFilter
+                    cameraFilter = cameraFilter,
+                    cameraFlip = cameraFlip
                 ) ?: OverlayConfig(
                     id = UUID.randomUUID().toString(),
                     name = name,
@@ -255,7 +260,8 @@ object OverlayEditDialog {
                     posXPercent = xPercent,
                     posYPercent = yPercent,
                     cameraShape = cameraShape,
-                    cameraFilter = cameraFilter
+                    cameraFilter = cameraFilter,
+                    cameraFlip = cameraFlip
                 )
                 onSave(config)
                 dialog.dismiss()

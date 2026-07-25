@@ -22,7 +22,8 @@ data class OverlayConfig(
     val contentOffsetX: Int = 0,
     val contentOffsetY: Int = 0,
     val cameraShape: String = "square",
-    val cameraFilter: String = "normal"
+    val cameraFilter: String = "normal",
+    val cameraFlip: Boolean = true
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -46,6 +47,7 @@ data class OverlayConfig(
             put("contentOffsetY", contentOffsetY)
             put("cameraShape", cameraShape)
             put("cameraFilter", cameraFilter)
+            put("cameraFlip", cameraFlip)
         }
     }
 
@@ -71,7 +73,8 @@ data class OverlayConfig(
                 contentOffsetX = json.optInt("contentOffsetX", 0),
                 contentOffsetY = json.optInt("contentOffsetY", 0),
                 cameraShape = json.optString("cameraShape", "square"),
-                cameraFilter = json.optString("cameraFilter", "normal")
+                cameraFilter = json.optString("cameraFilter", "normal"),
+                cameraFlip = json.optBoolean("cameraFlip", true)
             )
         }
     }
