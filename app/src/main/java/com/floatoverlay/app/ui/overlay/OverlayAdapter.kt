@@ -20,6 +20,8 @@ class OverlayAdapter(
         fun onEdit(overlay: OverlayConfig)
         fun onDelete(overlay: OverlayConfig)
         fun onRefresh(overlay: OverlayConfig)
+        fun onMoveUp(overlay: OverlayConfig)
+        fun onMoveDown(overlay: OverlayConfig)
     }
 
     inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -29,6 +31,8 @@ class OverlayAdapter(
         val refreshButton: ImageButton = itemView.findViewById(R.id.refreshOverlayButton)
         val editButton: ImageButton = itemView.findViewById(R.id.editOverlayButton)
         val deleteButton: ImageButton = itemView.findViewById(R.id.deleteOverlayButton)
+        val moveUpButton: ImageButton = itemView.findViewById(R.id.moveUpButton)
+        val moveDownButton: ImageButton = itemView.findViewById(R.id.moveDownButton)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -41,8 +45,10 @@ class OverlayAdapter(
         val overlay = overlays[position]
         holder.name.text = overlay.name
         holder.url.text = overlay.url
-        holder.enabled.isChecked = overlay.enabled
 
+        // Remove listener before setting checked state to avoid stale callbacks from recycling.
+        holder.enabled.setOnCheckedChangeListener(null)
+        holder.enabled.isChecked = overlay.enabled
         holder.enabled.setOnCheckedChangeListener { _, isChecked ->
             listener.onToggle(overlay, isChecked)
         }
@@ -58,6 +64,15 @@ class OverlayAdapter(
         holder.deleteButton.setOnClickListener {
             listener.onDelete(overlay)
         }
+
+        holder.moveUpButton.setOnClickListener {
+            listener.onMoveUp(overlay)
+        }
+        holder.moveDownButton.setOnClickListener {
+            listener.onMoveDown(overlay)
+        }
+        holder.moveUpButton.visibility = if (position == 0) View.INVISIBLE else View.VISIBLE
+        holder.moveDownButton.visibility = if (position == itemCount - 1) View.INVISIBLE else View.VISIBLE
     }
 
     override fun getItemCount(): Int = overlays.size

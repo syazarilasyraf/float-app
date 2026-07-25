@@ -21,6 +21,7 @@ data class OverlayConfig(
     val zoomMode: String = "layout",
     val contentOffsetX: Int = 0,
     val contentOffsetY: Int = 0,
+    val zIndex: Int = 0,
     val cameraShape: String = "square",
     val cameraFilter: String = "normal",
     val cameraFlip: Boolean = true
@@ -45,6 +46,7 @@ data class OverlayConfig(
             put("zoomMode", zoomMode)
             put("contentOffsetX", contentOffsetX)
             put("contentOffsetY", contentOffsetY)
+            put("zIndex", zIndex)
             put("cameraShape", cameraShape)
             put("cameraFilter", cameraFilter)
             put("cameraFlip", cameraFlip)
@@ -72,6 +74,7 @@ data class OverlayConfig(
                 zoomMode = json.optString("zoomMode", "layout"),
                 contentOffsetX = json.optInt("contentOffsetX", 0),
                 contentOffsetY = json.optInt("contentOffsetY", 0),
+                zIndex = json.optInt("zIndex", 0),
                 cameraShape = json.optString("cameraShape", "square"),
                 cameraFilter = json.optString("cameraFilter", "normal"),
                 cameraFlip = json.optBoolean("cameraFlip", true)

@@ -24,6 +24,7 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = OverlayRepository(requireContext())
+        migrateZIndex()
     }
 
     override fun onCreateView(
@@ -40,7 +41,7 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
         recyclerView = view.findViewById(R.id.overlayRecyclerView)
         addButton = view.findViewById(R.id.addOverlayButton)
 
-        adapter = OverlayAdapter(repository.getOverlays(), this)
+        adapter = OverlayAdapter(getSortedOverlays(), this)
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
         recyclerView.adapter = adapter
 
@@ -90,8 +91,55 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
         FloatOverlayService.refreshOverlay(requireContext(), overlay.id)
     }
 
+    override fun onMoveUp(overlay: OverlayConfig) {
+        moveOverlay(overlay, -1)
+    }
+
+    override fun onMoveDown(overlay: OverlayConfig) {
+        moveOverlay(overlay, 1)
+    }
+
+    private fun moveOverlay(overlay: OverlayConfig, direction: Int) {
+        val sorted = getSortedOverlays().toMutableList()
+        val index = sorted.indexOfFirst { it.id == overlay.id }
+        if (index < 0) return
+        val neighborIndex = index + direction
+        if (neighborIndex < 0 || neighborIndex >= sorted.size) return
+
+        val current = sorted[index]
+        val neighbor = sorted[neighborIndex]
+        val currentZ = current.zIndex
+        val neighborZ = neighbor.zIndex
+
+        repository.addOrUpdate(current.copy(zIndex = neighborZ))
+        repository.addOrUpdate(neighbor.copy(zIndex = currentZ))
+
+        refresh()
+        FloatOverlayService.reorderOverlays(requireContext())
+    }
+
     private fun refresh() {
-        adapter.updateData(repository.getOverlays())
+        adapter.updateData(getSortedOverlays())
+    }
+
+    private fun getSortedOverlays(): List<OverlayConfig> {
+        return repository.getOverlays().sortedWith(
+            compareByDescending<OverlayConfig> { it.zIndex }
+                .thenBy { it.id }
+        )
+    }
+
+    private fun migrateZIndex() {
+        val overlays = repository.getOverlays()
+        if (overlays.isEmpty()) return
+        // If every overlay still has the default zIndex, assign list order once.
+        // The topmost item (last in the original list) gets the highest zIndex.
+        if (overlays.all { it.zIndex == 0 }) {
+            val count = overlays.size
+            overlays.forEachIndexed { index, overlay ->
+                repository.addOrUpdate(overlay.copy(zIndex = count - 1 - index))
+            }
+        }
     }
 
     private fun reloadOverlays(overlayId: String? = null) {

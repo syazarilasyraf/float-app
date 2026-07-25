@@ -119,6 +119,10 @@ class FloatOverlayService : Service() {
                 LogStore.log(TAG, "Refresh overlay command received, id=$id")
                 refreshOverlay(id)
             }
+            ACTION_REORDER_OVERLAYS -> {
+                LogStore.log(TAG, "Reorder overlays command received")
+                reorderOverlays()
+            }
         }
         return START_STICKY
     }
@@ -249,6 +253,7 @@ class FloatOverlayService : Service() {
                 }
             }
 
+            reorderOverlays()
             isExpanded = true
             bringIconToFront()
             clearBadge()
@@ -275,6 +280,24 @@ class FloatOverlayService : Service() {
         } catch (e: Exception) {
             LogStore.logError(TAG, "bringIconToFront failed", e)
         }
+    }
+
+    private fun reorderOverlays() {
+        if (overlayViews.isEmpty()) return
+        val sorted = overlayViews.toList().sortedBy { (id, _) ->
+            lastConfigs[id]?.zIndex ?: repository.getOverlay(id)?.zIndex ?: 0
+        }
+        sorted.forEach { (id, container) ->
+            val params = overlayParams[id] ?: return@forEach
+            try {
+                windowManager?.removeView(container)
+                windowManager?.addView(container, params)
+                LogStore.log(TAG, "Reordered overlay $id (z=${lastConfigs[id]?.zIndex ?: repository.getOverlay(id)?.zIndex ?: 0})")
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "reorderOverlays failed for $id", e)
+            }
+        }
+        bringIconToFront()
     }
 
     private fun reloadOverlays(changedId: String?) {
@@ -389,12 +412,18 @@ class FloatOverlayService : Service() {
                     FrameLayout.LayoutParams.MATCH_PARENT
                 )
                 tag = "overlayCameraView"
+                isClickable = false
+                isFocusable = false
+                isLongClickable = false
             }
             container.addView(previewView)
             bindCamera(config, previewView)
             applyCameraShape(container, config)
             applyCameraFilter(container, config)
             applyCameraOpacity(container, config)
+            if (!config.touchThrough) {
+                previewView.setOnTouchListener(setupDragListener(container, params, config))
+            }
         } else {
             val webView = WebView(this)
             webView.layoutParams = FrameLayout.LayoutParams(
@@ -653,10 +682,13 @@ class FloatOverlayService : Service() {
         if (config.posXPercent < 0f || config.posYPercent < 0f) {
             val xPercent = params.x.toFloat() / screenSize.first
             val yPercent = params.y.toFloat() / screenSize.second
-            repository.addOrUpdate(config.copy(posXPercent = xPercent, posYPercent = yPercent))
+            val saved = config.copy(posXPercent = xPercent, posYPercent = yPercent)
+            repository.addOrUpdate(saved)
+            lastConfigs[config.id] = saved
             LogStore.log(TAG, "Saved initial position for ${config.name}: $xPercent,$yPercent")
+        } else {
+            lastConfigs[config.id] = config
         }
-        lastConfigs[config.id] = config
         LogStore.log(TAG, "Overlay (${config.name}) added at $x,$y (${config.posXPercent},${config.posYPercent})")
         return container
     }
@@ -676,7 +708,9 @@ class FloatOverlayService : Service() {
             LogStore.log(TAG, "Updated size for ${newConfig.name}: ${newConfig.widthDp}x${newConfig.heightDp} dp")
         }
 
-        if (oldConfig.posXPercent != newConfig.posXPercent || oldConfig.posYPercent != newConfig.posYPercent) {
+        if ((oldConfig.posXPercent != newConfig.posXPercent || oldConfig.posYPercent != newConfig.posYPercent) &&
+            newConfig.posXPercent >= 0f && newConfig.posYPercent >= 0f
+        ) {
             params.x = percentToX(newConfig.posXPercent, overlayViews.size, screenSize.first)
             params.y = percentToY(newConfig.posYPercent, overlayViews.size, screenSize.second)
             windowManager?.updateViewLayout(container, params)
@@ -757,6 +791,9 @@ class FloatOverlayService : Service() {
 
         container.setOnTouchListener(if (isInteractive) setupDragListener(container, params, config) else null)
         resizeHandle?.setOnTouchListener(if (isInteractive) setupResizeListener(resizeHandle, params, config) else null)
+
+        val cameraView = container.findViewWithTag<PreviewView>("overlayCameraView")
+        cameraView?.setOnTouchListener(if (isInteractive) setupDragListener(container, params, config) else null)
     }
 
     private fun setupDragListener(view: View, params: WindowManager.LayoutParams, config: OverlayConfig): View.OnTouchListener {
@@ -805,7 +842,9 @@ class FloatOverlayService : Service() {
                         val xPercent = params.x.toFloat() / screenSize.first
                         val yPercent = params.y.toFloat() / screenSize.second
                         val latest = repository.getOverlay(config.id) ?: config
-                        repository.addOrUpdate(latest.copy(posXPercent = xPercent, posYPercent = yPercent))
+                        val saved = latest.copy(posXPercent = xPercent, posYPercent = yPercent)
+                        repository.addOrUpdate(saved)
+                        lastConfigs[config.id] = saved
                         LogStore.log(TAG, "Saved position for ${config.name}: ${xPercent},${yPercent}")
                     } else {
                         view.performClick()
@@ -846,7 +885,9 @@ class FloatOverlayService : Service() {
                     val newWidthDp = pxToDp(params.width).coerceIn(50, 1000)
                     val newHeightDp = pxToDp(params.height).coerceIn(50, 1000)
                     val latest = repository.getOverlay(config.id) ?: config
-                    repository.addOrUpdate(latest.copy(widthDp = newWidthDp, heightDp = newHeightDp))
+                    val saved = latest.copy(widthDp = newWidthDp, heightDp = newHeightDp)
+                    repository.addOrUpdate(saved)
+                    lastConfigs[config.id] = saved
                     LogStore.log(TAG, "Resized ${config.name} to ${newWidthDp}x${newHeightDp} dp")
                     true
                 }
@@ -978,6 +1019,7 @@ class FloatOverlayService : Service() {
         const val ACTION_CLEAR_BADGE = "com.floatoverlay.app.CLEAR_BADGE"
         const val ACTION_RELOAD_OVERLAYS = "com.floatoverlay.app.RELOAD_OVERLAYS"
         const val ACTION_REFRESH_OVERLAY = "com.floatoverlay.app.REFRESH_OVERLAY"
+        const val ACTION_REORDER_OVERLAYS = "com.floatoverlay.app.REORDER_OVERLAYS"
         const val EXTRA_CATEGORY = "category"
         const val EXTRA_AMOUNT = "amount"
         const val EXTRA_OVERLAY_ID = "overlay_id"
@@ -1011,6 +1053,13 @@ class FloatOverlayService : Service() {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
                 action = ACTION_REFRESH_OVERLAY
                 putExtra(EXTRA_OVERLAY_ID, overlayId)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun reorderOverlays(context: Context) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_REORDER_OVERLAYS
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
