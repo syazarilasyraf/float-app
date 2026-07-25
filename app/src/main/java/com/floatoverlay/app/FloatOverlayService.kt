@@ -421,9 +421,6 @@ class FloatOverlayService : Service() {
             applyCameraShape(container, config)
             applyCameraFilter(container, config)
             applyCameraOpacity(container, config)
-            if (!config.touchThrough) {
-                previewView.setOnTouchListener(setupDragListener(container, params, config))
-            }
         } else {
             val webView = WebView(this)
             webView.layoutParams = FrameLayout.LayoutParams(
@@ -464,6 +461,7 @@ class FloatOverlayService : Service() {
         }
 
         val minimizeButton = TextView(this).apply {
+            tag = "minimizeButton"
             text = "−"
             textSize = 24f
             setTextColor(0xFFFFFFFF.toInt())
@@ -472,14 +470,8 @@ class FloatOverlayService : Service() {
                 gravity = Gravity.TOP or Gravity.END
                 setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
             }
-            setOnClickListener {
-                hideOverlays()
-            }
         }
         container.addView(minimizeButton)
-
-        val isInteractive = !config.touchThrough
-        val showHandle = config.showResizeHandle && isInteractive
 
         val resizeHandle = View(this).apply {
             tag = "resizeHandle"
@@ -487,17 +479,36 @@ class FloatOverlayService : Service() {
             layoutParams = FrameLayout.LayoutParams(dpToPx(12), dpToPx(12)).apply {
                 gravity = Gravity.BOTTOM or Gravity.END
             }
-            visibility = if (showHandle) View.VISIBLE else View.GONE
-        }
-        if (isInteractive) {
-            setupResize(resizeHandle, params, config)
         }
         container.addView(resizeHandle)
 
-        if (isInteractive) {
-            setupDrag(container, params, config)
-        }
+        applyInteractiveState(container, params, config)
         return container
+    }
+
+    private fun applyInteractiveState(container: FrameLayout, params: WindowManager.LayoutParams, config: OverlayConfig) {
+        val isTouchThrough = config.touchThrough
+        val isLocked = config.locked
+        val canDragResize = !isTouchThrough && !isLocked
+        val canCameraDoubleTap = isCameraUrl(config.url) && !isTouchThrough && isLocked
+
+        val resizeHandle = container.findViewWithTag<View>("resizeHandle")
+        resizeHandle?.visibility = if (config.showResizeHandle && canDragResize) View.VISIBLE else View.GONE
+        resizeHandle?.setOnTouchListener(if (canDragResize) setupResizeListener(resizeHandle, params, config) else null)
+
+        container.setOnTouchListener(if (canDragResize) setupDragListener(container, params, config) else null)
+
+        val cameraView = container.findViewWithTag<PreviewView>("overlayCameraView")
+        cameraView?.setOnTouchListener(
+            when {
+                canDragResize -> setupDragListener(container, params, config)
+                canCameraDoubleTap -> setupCameraDoubleTapListener(config)
+                else -> null
+            }
+        )
+
+        val minimizeButton = container.findViewWithTag<View>("minimizeButton")
+        minimizeButton?.setOnClickListener(if (!isTouchThrough) { _ -> hideOverlays() } else null)
     }
 
     private fun applyZoom(webView: WebView, config: OverlayConfig) {
@@ -755,9 +766,11 @@ class FloatOverlayService : Service() {
         }
 
         if (oldConfig.touchThrough != newConfig.touchThrough ||
-            oldConfig.showResizeHandle != newConfig.showResizeHandle
+            oldConfig.showResizeHandle != newConfig.showResizeHandle ||
+            oldConfig.locked != newConfig.locked
         ) {
-            updateInteractivity(container, params, newConfig)
+            val readd = oldConfig.touchThrough != newConfig.touchThrough
+            updateInteractivity(container, params, newConfig, readd)
             LogStore.log(TAG, "Updated interactivity for ${newConfig.name}")
         }
 
@@ -776,24 +789,37 @@ class FloatOverlayService : Service() {
         }
     }
 
-    private fun updateInteractivity(container: FrameLayout, params: WindowManager.LayoutParams, config: OverlayConfig) {
-        val isInteractive = !config.touchThrough
-
-        params.flags = if (config.touchThrough) {
-            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        } else {
-            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+    private fun updateInteractivity(
+        container: FrameLayout,
+        params: WindowManager.LayoutParams,
+        config: OverlayConfig,
+        readd: Boolean = false
+    ) {
+        val currentlyNotTouchable = (params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) != 0
+        val shouldBeNotTouchable = config.touchThrough
+        if (currentlyNotTouchable != shouldBeNotTouchable) {
+            params.flags = if (shouldBeNotTouchable) {
+                params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            } else {
+                params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            }
         }
-        windowManager?.updateViewLayout(container, params)
 
-        val resizeHandle = container.findViewWithTag<View>("resizeHandle")
-        resizeHandle?.visibility = if (config.showResizeHandle && isInteractive) View.VISIBLE else View.GONE
-
-        container.setOnTouchListener(if (isInteractive) setupDragListener(container, params, config) else null)
-        resizeHandle?.setOnTouchListener(if (isInteractive) setupResizeListener(resizeHandle, params, config) else null)
-
-        val cameraView = container.findViewWithTag<PreviewView>("overlayCameraView")
-        cameraView?.setOnTouchListener(if (isInteractive) setupDragListener(container, params, config) else null)
+        if (readd) {
+            try {
+                windowManager?.removeView(container)
+                windowManager?.addView(container, params)
+                LogStore.log(TAG, "Re-added ${config.name} to apply touch-through flag change")
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Re-add failed for ${config.name}, falling back to updateViewLayout", e)
+                windowManager?.updateViewLayout(container, params)
+            }
+            applyInteractiveState(container, params, config)
+            reorderOverlays()
+        } else {
+            windowManager?.updateViewLayout(container, params)
+            applyInteractiveState(container, params, config)
+        }
     }
 
     private fun setupDragListener(view: View, params: WindowManager.LayoutParams, config: OverlayConfig): View.OnTouchListener {
@@ -902,6 +928,16 @@ class FloatOverlayService : Service() {
 
     private fun setupDrag(view: View, params: WindowManager.LayoutParams, config: OverlayConfig) {
         view.setOnTouchListener(setupDragListener(view, params, config))
+    }
+
+    private fun setupCameraDoubleTapListener(config: OverlayConfig): View.OnTouchListener {
+        val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                flipCamera(config.id)
+                return true
+            }
+        })
+        return View.OnTouchListener { _, event -> detector.onTouchEvent(event) }
     }
 
     private fun setupIconDrag(view: View, params: WindowManager.LayoutParams) {

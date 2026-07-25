@@ -35,6 +35,7 @@ object OverlayEditDialog {
         val enabledSwitch = view.findViewById<MaterialSwitch>(R.id.enabledSwitch)
         val transparentSwitch = view.findViewById<MaterialSwitch>(R.id.transparentBackgroundSwitch)
         val resizeHandleSwitch = view.findViewById<MaterialSwitch>(R.id.showResizeHandleSwitch)
+        val lockPositionSwitch = view.findViewById<MaterialSwitch>(R.id.lockPositionSwitch)
         val touchThroughSwitch = view.findViewById<MaterialSwitch>(R.id.touchThroughSwitch)
         val widthInput = view.findViewById<TextInputEditText>(R.id.widthInput)
         val heightInput = view.findViewById<TextInputEditText>(R.id.heightInput)
@@ -85,6 +86,7 @@ object OverlayEditDialog {
             enabledSwitch.isChecked = it.enabled
             transparentSwitch.isChecked = it.transparentBackground
             resizeHandleSwitch.isChecked = it.showResizeHandle
+            lockPositionSwitch.isChecked = it.locked
             touchThroughSwitch.isChecked = it.touchThrough
             widthInput.setText(it.widthDp.toString())
             heightInput.setText(it.heightDp.toString())
@@ -225,6 +227,7 @@ object OverlayEditDialog {
                     enabled = enabledSwitch.isChecked,
                     transparentBackground = transparentSwitch.isChecked,
                     showResizeHandle = resizeHandleSwitch.isChecked,
+                    locked = lockPositionSwitch.isChecked,
                     touchThrough = touchThroughSwitch.isChecked,
                     widthDp = width,
                     heightDp = height,
@@ -247,6 +250,7 @@ object OverlayEditDialog {
                     enabled = enabledSwitch.isChecked,
                     transparentBackground = transparentSwitch.isChecked,
                     showResizeHandle = resizeHandleSwitch.isChecked,
+                    locked = lockPositionSwitch.isChecked,
                     touchThrough = touchThroughSwitch.isChecked,
                     widthDp = width,
                     heightDp = height,

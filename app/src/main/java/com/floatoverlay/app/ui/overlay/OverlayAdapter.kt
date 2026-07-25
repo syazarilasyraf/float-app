@@ -27,6 +27,7 @@ class OverlayAdapter(
     inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val name: TextView = itemView.findViewById(R.id.overlayName)
         val url: TextView = itemView.findViewById(R.id.overlayUrl)
+        val locked: TextView = itemView.findViewById(R.id.overlayLocked)
         val enabled: Switch = itemView.findViewById(R.id.overlayEnabled)
         val refreshButton: ImageButton = itemView.findViewById(R.id.refreshOverlayButton)
         val editButton: ImageButton = itemView.findViewById(R.id.editOverlayButton)
@@ -45,6 +46,7 @@ class OverlayAdapter(
         val overlay = overlays[position]
         holder.name.text = overlay.name
         holder.url.text = overlay.url
+        holder.locked.visibility = if (overlay.locked) View.VISIBLE else View.GONE
 
         // Remove listener before setting checked state to avoid stale callbacks from recycling.
         holder.enabled.setOnCheckedChangeListener(null)

@@ -31,6 +31,17 @@
             android:textSize="12sp"
             tools:text="https://example.com/browser-source" />
 
+        <TextView
+            android:id="@+id/overlayLocked"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="🔒 Locked"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="11sp"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
     </LinearLayout>
 
     <Switch
