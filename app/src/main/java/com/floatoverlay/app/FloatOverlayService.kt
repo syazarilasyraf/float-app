@@ -205,8 +205,8 @@ class FloatOverlayService : Service() {
         windowManager = windowManager ?: getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         val params = WindowManager.LayoutParams(
-            dpToPx(36),
-            dpToPx(36),
+            dpToPx(20),
+            dpToPx(20),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
@@ -486,19 +486,6 @@ class FloatOverlayService : Service() {
             container.addView(webView)
         }
 
-        val minimizeButton = TextView(this).apply {
-            tag = "minimizeButton"
-            text = "−"
-            textSize = 24f
-            setTextColor(0xFFFFFFFF.toInt())
-            gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(dpToPx(28), dpToPx(28)).apply {
-                gravity = Gravity.TOP or Gravity.END
-                setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
-            }
-        }
-        container.addView(minimizeButton)
-
         val resizeHandle = View(this).apply {
             tag = "resizeHandle"
             background = getDrawable(R.drawable.resize_handle)
@@ -533,8 +520,6 @@ class FloatOverlayService : Service() {
             }
         )
 
-        val minimizeButton = container.findViewWithTag<View>("minimizeButton")
-        minimizeButton?.setOnClickListener(if (!isTouchThrough) { _ -> hideOverlays() } else null)
     }
 
     private fun applyZoom(webView: WebView, config: OverlayConfig) {
