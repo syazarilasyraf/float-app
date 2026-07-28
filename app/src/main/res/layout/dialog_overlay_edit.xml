@@ -105,6 +105,30 @@
                 android:checked="true"
                 android:text="Flip camera (un-mirror preview)" />
 
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="Rotation"
+                style="@style/Widget.Material3.TextInputLayout.FilledBox.ExposedDropdownMenu">
+
+                <AutoCompleteTextView
+                    android:id="@+id/cameraRotationDropdown"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="none" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <TextView
+                android:id="@+id/cameraRotationHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Auto follows the phone. Set manually if the camera looks sideways in landscape."
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12sp" />
+
             <TextView
                 android:id="@+id/cameraHint"
                 android:layout_width="match_parent"

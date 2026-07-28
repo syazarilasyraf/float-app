@@ -10,7 +10,8 @@ data class WindowPreset(
     val heightPercent: Int,
     val xPercent: Int,
     val yPercent: Int,
-    val isFullscreen: Boolean = false
+    val isFullscreen: Boolean = false,
+    val linkedProfileName: String = ""
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -20,6 +21,7 @@ data class WindowPreset(
         put("xPercent", xPercent)
         put("yPercent", yPercent)
         put("isFullscreen", isFullscreen)
+        put("linkedProfileName", linkedProfileName)
     }
 
     companion object {
@@ -30,7 +32,8 @@ data class WindowPreset(
             heightPercent = json.optInt("heightPercent", 100),
             xPercent = json.optInt("xPercent", 0),
             yPercent = json.optInt("yPercent", 0),
-            isFullscreen = json.optBoolean("isFullscreen", false)
+            isFullscreen = json.optBoolean("isFullscreen", false),
+            linkedProfileName = json.optString("linkedProfileName", "")
         )
     }
 }

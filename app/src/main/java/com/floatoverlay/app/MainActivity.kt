@@ -24,10 +24,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var startOverlayButton: Button
     private lateinit var stopOverlayButton: Button
     private lateinit var autoShowSwitch: MaterialSwitch
+    private lateinit var autoApplyProfileSwitch: MaterialSwitch
     private lateinit var viewPager: ViewPager2
     private lateinit var tabLayout: TabLayout
 
     private lateinit var repository: OverlayRepository
+    private lateinit var profileRepository: ProfileRepository
 
     private val overlaySettingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -55,13 +57,19 @@ class MainActivity : AppCompatActivity() {
         startOverlayButton = findViewById(R.id.startOverlayButton)
         stopOverlayButton = findViewById(R.id.stopOverlayButton)
         autoShowSwitch = findViewById(R.id.autoShowSwitch)
+        autoApplyProfileSwitch = findViewById(R.id.autoApplyProfileSwitch)
         viewPager = findViewById(R.id.viewPager)
         tabLayout = findViewById(R.id.tabLayout)
 
         repository = OverlayRepository(this)
+        profileRepository = ProfileRepository(this)
         autoShowSwitch.isChecked = repository.isAutoShowEnabled()
         autoShowSwitch.setOnCheckedChangeListener { _, isChecked ->
             repository.setAutoShowEnabled(isChecked)
+        }
+        autoApplyProfileSwitch.isChecked = profileRepository.isAutoApplyOnRotationEnabled()
+        autoApplyProfileSwitch.setOnCheckedChangeListener { _, isChecked ->
+            profileRepository.setAutoApplyOnRotationEnabled(isChecked)
         }
 
         grantPermissionButton.setOnClickListener {

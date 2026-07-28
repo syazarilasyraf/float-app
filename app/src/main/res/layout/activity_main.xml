@@ -61,6 +61,15 @@
         android:checked="true"
         android:text="Auto-show overlays on start" />
 
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/autoApplyProfileSwitch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:checked="false"
+        android:text="Auto-apply profile on rotation" />
+
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
         android:layout_width="match_parent"
