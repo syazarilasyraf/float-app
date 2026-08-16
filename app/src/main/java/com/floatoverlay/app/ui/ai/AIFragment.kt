@@ -26,10 +26,6 @@ import com.floatoverlay.app.ai.AIProviderFactory
 import com.floatoverlay.app.ai.ToolExecutionResult
 import com.floatoverlay.app.ai.ToolRegistry
 import com.floatoverlay.app.ai.asText
-import com.floatoverlay.app.ai.provider.MockAIProvider
-import com.floatoverlay.app.ai.tool.AddBuildStepTool
-import com.floatoverlay.app.ai.tool.AddMaterialTool
-import com.floatoverlay.app.ai.tool.CreateBuildProjectTool
 import com.floatoverlay.app.data.ConversationRepository
 import com.floatoverlay.app.data.ProjectRepository
 import com.floatoverlay.app.data.SettingsRepository
@@ -278,8 +274,7 @@ class AIFragment : Fragment() {
     }
 
     private fun registerTools() {
-        ToolRegistry.register(CreateBuildProjectTool(projectRepository))
-        ToolRegistry.register(AddMaterialTool(projectRepository))
-        ToolRegistry.register(AddBuildStepTool(projectRepository))
+        // No tools are registered for now. The AI acts as a general assistant
+        // for app settings and setup help. Minecraft remains fully manual.
     }
 }

@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PixelFormat
@@ -74,6 +75,7 @@ class FloatOverlayService : Service() {
 
     private val aiAdapters = mutableMapOf<String, ChatAdapter>()
     private val minecraftProjectIds = mutableMapOf<String, String>()
+    private val minecraftImageScales = mutableMapOf<String, Float>()
 
     private var cameraProvider: ProcessCameraProvider? = null
     private val cameraUseCases = mutableMapOf<String, Preview>()
@@ -100,7 +102,6 @@ class FloatOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         LogStore.log(TAG, "Service onCreate")
-        registerWorkspaceTools()
         repository = OverlayRepository(this)
         profileRepository = ProfileRepository(this)
         counter = NotificationCounter(repository)
@@ -1374,6 +1375,8 @@ class FloatOverlayService : Service() {
         val stepDescription = root.findViewById<TextView>(R.id.focusStepDescription)
         val prevButton = root.findViewById<Button>(R.id.focusPrevButton)
         val nextButton = root.findViewById<Button>(R.id.focusNextButton)
+        val zoomInButton = root.findViewById<Button>(R.id.focusZoomInButton)
+        val zoomOutButton = root.findViewById<Button>(R.id.focusZoomOutButton)
         val materialProgress = root.findViewById<TextView>(R.id.focusMaterialProgress)
 
         titleText.text = project.name
@@ -1395,6 +1398,22 @@ class FloatOverlayService : Service() {
             }
         } else {
             imageView.setImageResource(R.drawable.ic_overlay)
+        }
+
+        // Initialize or restore zoom scale for this project.
+        val scale = minecraftImageScales.getOrPut(projectId) { 1f }
+        applyImageZoom(imageView, scale)
+
+        zoomInButton.setOnClickListener {
+            val newScale = (minecraftImageScales[projectId] ?: 1f) * 1.2f
+            minecraftImageScales[projectId] = newScale.coerceAtMost(5f)
+            applyImageZoom(imageView, minecraftImageScales[projectId] ?: 1f)
+        }
+
+        zoomOutButton.setOnClickListener {
+            val newScale = (minecraftImageScales[projectId] ?: 1f) / 1.2f
+            minecraftImageScales[projectId] = newScale.coerceAtLeast(0.5f)
+            applyImageZoom(imageView, minecraftImageScales[projectId] ?: 1f)
         }
 
         materialProgress.text = "Materials: ${project.materialProgressPercent}%"
@@ -1426,6 +1445,28 @@ class FloatOverlayService : Service() {
                 ProjectRepository(this).saveProject(updated)
                 refreshMinecraftView(root, projectId)
             }
+        }
+    }
+
+    private fun applyImageZoom(imageView: ImageView, scale: Float) {
+        imageView.post {
+            val drawable = imageView.drawable ?: return@post
+            val matrix = Matrix()
+            val drawableWidth = drawable.intrinsicWidth.toFloat()
+            val drawableHeight = drawable.intrinsicHeight.toFloat()
+            val viewWidth = imageView.width.toFloat()
+            val viewHeight = imageView.height.toFloat()
+            if (drawableWidth <= 0 || drawableHeight <= 0 || viewWidth <= 0 || viewHeight <= 0) return@post
+
+            // Fit center as baseline, then apply scale.
+            val scaleFit = (viewWidth / drawableWidth).coerceAtMost(viewHeight / drawableHeight)
+            val finalScale = scaleFit * scale
+            val dx = (viewWidth - drawableWidth * finalScale) / 2f
+            val dy = (viewHeight - drawableHeight * finalScale) / 2f
+
+            matrix.setScale(finalScale, finalScale)
+            matrix.postTranslate(dx, dy)
+            imageView.imageMatrix = matrix
         }
     }
 
@@ -1499,19 +1540,6 @@ class FloatOverlayService : Service() {
         } catch (e: Exception) {
             LogStore.logError(TAG, "handleFloatingAiResponse failed", e)
         }
-    }
-
-    private fun registerWorkspaceTools() {
-        val projectRepo = ProjectRepository(this)
-        com.floatoverlay.app.ai.ToolRegistry.register(
-            com.floatoverlay.app.ai.tool.CreateBuildProjectTool(projectRepo)
-        )
-        com.floatoverlay.app.ai.ToolRegistry.register(
-            com.floatoverlay.app.ai.tool.AddMaterialTool(projectRepo)
-        )
-        com.floatoverlay.app.ai.ToolRegistry.register(
-            com.floatoverlay.app.ai.tool.AddBuildStepTool(projectRepo)
-        )
     }
 
     private fun isCameraUrl(url: String): Boolean = url.startsWith("camera://")
