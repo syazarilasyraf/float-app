@@ -1,6 +1,12 @@
-# Float Overlay
+# Float
 
-Android floating overlay app for mobile livestreamers. Display browser-source overlays (like OBS browser sources) as floating widgets above fullscreen games while streaming from TikTok Live and similar apps.
+Float is a personal AI workspace for Android. It started as a floating overlay app for mobile livestreamers and is evolving into a general AI-capable workspace where modules like Minecraft, coding, and research can live on top of a shared overlay engine.
+
+## Current Vision
+
+Float is your personal AI assistant that lives on your Android phone and can appear above other apps when you need it.
+
+Minecraft is the first module. The architecture is designed so future modules can reuse the same AI, tool, resource, overlay, and persistence systems.
 
 ## Features
 
@@ -26,12 +32,54 @@ Android floating overlay app for mobile livestreamers. Display browser-source ov
 - **Draggable floating icon** — a small circle icon stays on screen at all times. Tap it to show/hide overlays, drag it to move it out of the way.
 - **Notification badge counter** — shows pending donation/chat/viewer events on the floating icon. Clears when overlays are opened.
 
+### AI Assistant
+- Chat with Float from inside the app or as a floating overlay above other apps.
+- Conversation state, loading state, error state, and clear conversation.
+- Messages are persisted locally.
+- Provider abstraction: `AIProvider` with a `MockAIProvider` for offline development.
+- No API keys are embedded in the app.
+
+### Tool System
+- Extensible `AITool` architecture with a `ToolRegistry`.
+- The AI can request tool calls; the app executes them and returns results.
+- Mock tools for Minecraft: create project, add material, add build step.
+- Future modules can register their own tools without changing the AI core.
+
+### Minecraft Module
+- Create and manage Minecraft build projects.
+- Each project has references, materials, steps, notes, and progress.
+- Materials can be marked collected.
+- Steps can be completed.
+- Open any project as a floating Focus Mode overlay above Minecraft.
+- Focus Mode shows only the current reference, current step, navigation, and material progress.
+
+### Resource Architecture
+- `ResourceProvider` abstraction for future web/image search.
+- `MockResourceProvider` returns offline demo results.
+
 ### Game Launcher
 - A dedicated **Game** tab for launching Clash Royale in a freeform window.
 - Save window presets with custom size and position as percentages of the physical screen.
 - Built-in **Launch fullscreen** preset for normal play.
 - Switching presets while the game is running reuses the existing task when possible.
-- Freeform support depends on the device/ROM. If the game opens fullscreen, freeform is not enabled on that device (some phones need the Taskbar app or Developer Options to enable it).
+- Freeform support depends on the device/ROM.
+
+## Architecture
+
+```
+Float
+├── Overlay Engine (FloatOverlayService)
+│   ├── Web overlays
+│   ├── Camera overlays
+│   ├── AI chat overlay
+│   └── Minecraft Focus Mode overlay
+├── Workspace
+│   ├── AI Assistant (AIProvider, AITool, Conversation)
+│   ├── Resource System (ResourceProvider)
+│   └── Local Data (Projects, References, Conversations)
+└── Modules
+    └── Minecraft (BuildProject, Material, BuildStep, Reference)
+```
 
 ## Tech Stack
 
@@ -78,13 +126,23 @@ On every push to `main`/`master`, the workflow in `.github/workflows/build-apk.y
 4. Tap **Start Overlay**. The small floating circle icon appears.
 5. Open your game. Tap the floating icon to show/hide the overlays.
 6. Long-press and drag an overlay to move it, or drag the resize handle to resize.
-7. Use the **Game** tab to launch Clash Royale in a freeform window preset, leaving empty screen space for your overlays.
+7. Use the **AI** tab to chat with Float.
+8. Use the **Minecraft** tab to create build projects.
+9. Open a project and tap **Open in Float** to launch Focus Mode above Minecraft.
 
 ## Permissions
 
 - `SYSTEM_ALERT_WINDOW` — draw overlays over other apps.
 - `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_SPECIAL_USE` — keep the overlay service running.
 - `INTERNET` — load browser-source URLs.
+- `CAMERA` — optional camera overlay feature.
+
+## Security
+
+- No API keys are embedded in source code.
+- No analytics.
+- No advertising.
+- No cloud sync or user accounts.
 
 ## Notes
 

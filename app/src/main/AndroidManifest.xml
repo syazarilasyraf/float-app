@@ -33,6 +33,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.minecraft.ProjectDetailActivity"
+            android:parentActivityName=".MainActivity" />
+
         <service
             android:name=".FloatOverlayService"
             android:enabled="true"

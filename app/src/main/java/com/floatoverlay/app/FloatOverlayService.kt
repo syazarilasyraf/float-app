@@ -29,7 +29,10 @@ import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.camera.core.CameraSelector
@@ -39,9 +42,15 @@ import androidx.camera.view.PreviewView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import com.floatoverlay.app.ai.asText
+import com.floatoverlay.app.data.ConversationRepository
+import com.floatoverlay.app.data.ProjectRepository
 import com.floatoverlay.app.model.OverlayConfig
+import com.floatoverlay.app.ui.ai.ChatAdapter
 import kotlin.math.min
 
 class FloatOverlayService : Service() {
@@ -56,6 +65,9 @@ class FloatOverlayService : Service() {
     private val overlayParams = mutableMapOf<String, WindowManager.LayoutParams>()
     private val lastConfigs = mutableMapOf<String, OverlayConfig>()
     private var iconParams: WindowManager.LayoutParams? = null
+
+    private val aiAdapters = mutableMapOf<String, ChatAdapter>()
+    private val minecraftProjectIds = mutableMapOf<String, String>()
 
     private var cameraProvider: ProcessCameraProvider? = null
     private val cameraUseCases = mutableMapOf<String, Preview>()
@@ -78,6 +90,7 @@ class FloatOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         LogStore.log(TAG, "Service onCreate")
+        registerWorkspaceTools()
         repository = OverlayRepository(this)
         counter = NotificationCounter(repository)
         serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_CREATE)
@@ -122,6 +135,18 @@ class FloatOverlayService : Service() {
             ACTION_REORDER_OVERLAYS -> {
                 LogStore.log(TAG, "Reorder overlays command received")
                 reorderOverlays()
+            }
+            ACTION_OPEN_FLOATING_AI -> {
+                LogStore.log(TAG, "Open floating AI command received")
+                openFloatingAI()
+            }
+            ACTION_OPEN_FLOATING_MINECRAFT -> {
+                val projectId = intent.getStringExtra(EXTRA_PROJECT_ID) ?: ""
+                LogStore.log(TAG, "Open floating Minecraft command received, project=$projectId")
+                if (projectId.isNotBlank()) openFloatingMinecraft(projectId)
+            }
+            ACTION_REFRESH_MINECRAFT_OVERLAYS -> {
+                refreshMinecraftOverlays()
             }
         }
         return START_STICKY
@@ -268,6 +293,71 @@ class FloatOverlayService : Service() {
         LogStore.log(TAG, "Hiding overlays")
         overlayViews.values.forEach { it.visibility = View.GONE }
         isExpanded = false
+    }
+
+    private fun openFloatingAI() {
+        if (overlayViews.containsKey(AI_OVERLAY_ID)) {
+            overlayViews[AI_OVERLAY_ID]?.visibility = View.VISIBLE
+            isExpanded = true
+            bringIconToFront()
+            return
+        }
+
+        val config = repository.getOverlay(AI_OVERLAY_ID) ?: OverlayConfig(
+            id = AI_OVERLAY_ID,
+            name = "Float AI",
+            url = "float://ai",
+            type = OverlayConfig.Type.AI_CHAT,
+            widthDp = 320,
+            heightDp = 420,
+            opacityPercent = 95,
+            touchThrough = false,
+            posXPercent = 0.05f,
+            posYPercent = 0.15f
+        )
+        repository.addOrUpdate(config)
+        val screenSize = getScreenSize()
+        addOverlay(config, screenSize)
+        isExpanded = true
+        bringIconToFront()
+    }
+
+    private fun openFloatingMinecraft(projectId: String) {
+        val overlayId = "$MINECRAFT_OVERLAY_PREFIX$projectId"
+        if (overlayViews.containsKey(overlayId)) {
+            overlayViews[overlayId]?.visibility = View.VISIBLE
+            isExpanded = true
+            bringIconToFront()
+            refreshMinecraftOverlays()
+            return
+        }
+
+        val project = ProjectRepository(this).getProject(projectId)
+        val config = repository.getOverlay(overlayId) ?: OverlayConfig(
+            id = overlayId,
+            name = project?.name ?: "Minecraft Build",
+            url = "float://minecraft/$projectId",
+            type = OverlayConfig.Type.MINECRAFT_PROJECT,
+            widthDp = 300,
+            heightDp = 380,
+            opacityPercent = 95,
+            touchThrough = false,
+            posXPercent = 0.05f,
+            posYPercent = 0.15f
+        )
+        repository.addOrUpdate(config)
+        val screenSize = getScreenSize()
+        addOverlay(config, screenSize)
+        isExpanded = true
+        bringIconToFront()
+    }
+
+    private fun refreshMinecraftOverlays() {
+        minecraftProjectIds.entries.forEach { (id, projectId) ->
+            overlayViews[id]?.let {
+                refreshMinecraftView(it.findViewWithTag("overlayMinecraftView"), projectId)
+            }
+        }
     }
 
     private fun bringIconToFront() {
@@ -421,43 +511,10 @@ class FloatOverlayService : Service() {
             applyCameraShape(container, config)
             applyCameraFilter(container, config)
             applyCameraOpacity(container, config)
-        } else {
-            val webView = WebView(this)
-            webView.layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            ).apply {
-                topMargin = dpToPx(24)
-            }
-            webView.settings.javaScriptEnabled = true
-            webView.settings.domStorageEnabled = true
-            webView.settings.useWideViewPort = true
-            webView.settings.loadWithOverviewMode = true
-            webView.settings.mediaPlaybackRequiresUserGesture = false
-            webView.webChromeClient = WebChromeClient()
-            webView.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    val currentConfig = repository.getOverlay(config.id) ?: config
-                    view?.let {
-                        applyZoom(it, currentConfig)
-                        applyOffset(it, currentConfig.contentOffsetX, currentConfig.contentOffsetY)
-                        scheduleVisualZoomRetries(currentConfig, it)
-                        LogStore.log(TAG, "Page finished for ${currentConfig.name}, applied zoom/offset")
-                    }
-                }
-            }
-            webView.setBackgroundColor(0x00000000)
-
-            if (config.url.isNotBlank()) {
-                LogStore.log(TAG, "Loading URL for ${config.name}: ${config.url}")
-                webView.loadUrl(config.url)
-            } else {
-                LogStore.log(TAG, "Loading sample HTML for ${config.name}")
-                webView.loadDataWithBaseURL(null, SAMPLE_OVERLAY_HTML, "text/html", "UTF-8", null)
-            }
-            webView.tag = "overlayWebView"
-            container.addView(webView)
+        } else when (config.resolvedType()) {
+            OverlayConfig.Type.AI_CHAT -> addAiChatContent(container, config)
+            OverlayConfig.Type.MINECRAFT_PROJECT -> addMinecraftContent(container, config)
+            else -> addWebContent(container, config)
         }
 
         val minimizeButton = TextView(this).apply {
@@ -1036,6 +1093,234 @@ class FloatOverlayService : Service() {
         return (px / resources.displayMetrics.density).toInt()
     }
 
+    private fun addWebContent(container: FrameLayout, config: OverlayConfig) {
+        val webView = WebView(this)
+        webView.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ).apply {
+            topMargin = dpToPx(24)
+        }
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.settings.useWideViewPort = true
+        webView.settings.loadWithOverviewMode = true
+        webView.settings.mediaPlaybackRequiresUserGesture = false
+        webView.webChromeClient = WebChromeClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                val currentConfig = repository.getOverlay(config.id) ?: config
+                view?.let {
+                    applyZoom(it, currentConfig)
+                    applyOffset(it, currentConfig.contentOffsetX, currentConfig.contentOffsetY)
+                    scheduleVisualZoomRetries(currentConfig, it)
+                    LogStore.log(TAG, "Page finished for ${currentConfig.name}, applied zoom/offset")
+                }
+            }
+        }
+        webView.setBackgroundColor(0x00000000)
+
+        if (config.url.isNotBlank()) {
+            LogStore.log(TAG, "Loading URL for ${config.name}: ${config.url}")
+            webView.loadUrl(config.url)
+        } else {
+            LogStore.log(TAG, "Loading sample HTML for ${config.name}")
+            webView.loadDataWithBaseURL(null, SAMPLE_OVERLAY_HTML, "text/html", "UTF-8", null)
+        }
+        webView.tag = "overlayWebView"
+        container.addView(webView)
+    }
+
+    private fun addAiChatContent(container: FrameLayout, config: OverlayConfig) {
+        val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+        val view = inflater.inflate(R.layout.floating_ai_chat, container, false)
+        view.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ).apply {
+            topMargin = dpToPx(24)
+        }
+
+        val recyclerView = view.findViewById<RecyclerView>(R.id.floatingChatRecyclerView)
+        val adapter = ChatAdapter()
+        aiAdapters[config.id] = adapter
+        recyclerView.layoutManager = LinearLayoutManager(this)
+        recyclerView.adapter = adapter
+
+        refreshAiChatAdapter(adapter)
+
+        view.findViewById<Button>(R.id.floatingChatSendButton).setOnClickListener {
+            val input = view.findViewById<android.widget.EditText>(R.id.floatingChatInput)
+            val text = input.text.toString().trim()
+            if (text.isNotEmpty()) {
+                sendFloatingAiMessage(text)
+                input.text.clear()
+            }
+        }
+
+        view.tag = "overlayAiChatView"
+        container.addView(view)
+    }
+
+    private fun addMinecraftContent(container: FrameLayout, config: OverlayConfig) {
+        val projectId = config.url.removePrefix("float://minecraft/")
+            .removePrefix("focus/")
+            .trim()
+        minecraftProjectIds[config.id] = projectId
+
+        val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+        val view = inflater.inflate(R.layout.floating_minecraft_focus, container, false)
+        view.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ).apply {
+            topMargin = dpToPx(24)
+        }
+
+        view.tag = "overlayMinecraftView"
+        container.addView(view)
+        refreshMinecraftView(view, projectId)
+    }
+
+    private fun refreshMinecraftView(view: View?, projectId: String) {
+        val root = view ?: return
+        val project = ProjectRepository(this).getProject(projectId) ?: return
+
+        val titleText = root.findViewById<TextView>(R.id.focusProjectName)
+        val imageView = root.findViewById<ImageView>(R.id.focusReferenceImage)
+        val stepCounter = root.findViewById<TextView>(R.id.focusStepCounter)
+        val stepTitle = root.findViewById<TextView>(R.id.focusStepTitle)
+        val stepDescription = root.findViewById<TextView>(R.id.focusStepDescription)
+        val prevButton = root.findViewById<Button>(R.id.focusPrevButton)
+        val nextButton = root.findViewById<Button>(R.id.focusNextButton)
+        val materialProgress = root.findViewById<TextView>(R.id.focusMaterialProgress)
+
+        titleText.text = project.name
+
+        val currentStepIndex = project.steps.indexOfFirst { !it.completed }.coerceAtLeast(0)
+        val step = project.steps.getOrNull(currentStepIndex)
+
+        stepCounter.text = "Step ${currentStepIndex + 1} / ${project.totalSteps}"
+        stepTitle.text = step?.title ?: "No steps yet"
+        stepDescription.text = step?.description ?: ""
+        stepDescription.visibility = if (stepDescription.text.isNullOrBlank()) View.GONE else View.VISIBLE
+
+        val ref = project.references.firstOrNull { it.imageUri.isNotBlank() }
+        if (ref != null) {
+            try {
+                imageView.setImageURI(android.net.Uri.parse(ref.imageUri))
+            } catch (e: Exception) {
+                imageView.setImageResource(R.drawable.ic_overlay)
+            }
+        } else {
+            imageView.setImageResource(R.drawable.ic_overlay)
+        }
+
+        materialProgress.text = "Materials: ${project.materialProgressPercent}%"
+
+        prevButton.setOnClickListener {
+            // Move to previous step by marking current as not completed.
+            val idx = project.steps.indexOfFirst { !it.completed }.coerceAtLeast(0)
+            if (idx > 0) {
+                val updated = project.copy(
+                    steps = project.steps.mapIndexed { i, s ->
+                        if (i == idx - 1) s.copy(completed = false) else s
+                    },
+                    updatedAt = System.currentTimeMillis()
+                )
+                ProjectRepository(this).saveProject(updated)
+                refreshMinecraftView(root, projectId)
+            }
+        }
+
+        nextButton.setOnClickListener {
+            val idx = project.steps.indexOfFirst { !it.completed }.coerceAtLeast(0)
+            if (idx < project.steps.size) {
+                val updated = project.copy(
+                    steps = project.steps.mapIndexed { i, s ->
+                        if (i == idx) s.copy(completed = true) else s
+                    },
+                    updatedAt = System.currentTimeMillis()
+                )
+                ProjectRepository(this).saveProject(updated)
+                refreshMinecraftView(root, projectId)
+            }
+        }
+    }
+
+    private fun refreshAiChatAdapter(adapter: ChatAdapter?) {
+        adapter ?: return
+        val conversation = ConversationRepository(this).getConversation()
+        adapter.submitList(conversation.messages)
+    }
+
+    private fun sendFloatingAiMessage(text: String) {
+        ConversationRepository(this).addMessage(
+            com.floatoverlay.app.model.Message(
+                role = com.floatoverlay.app.model.Message.Role.USER,
+                content = text
+            )
+        )
+        aiAdapters.values.forEach { refreshAiChatAdapter(it) }
+
+        // Use the same mock provider and tools as the in-app AI.
+        val provider = com.floatoverlay.app.ai.provider.MockAIProvider()
+        val conversation = ConversationRepository(this).getConversation()
+        provider.sendMessage(
+            conversation.messages,
+            com.floatoverlay.app.ai.ToolRegistry.all(),
+            object : com.floatoverlay.app.ai.AIProvider.AIResponseCallback {
+                override fun onLoading() {}
+                override fun onResult(message: com.floatoverlay.app.model.Message) {
+                    handleFloatingAiResponse(message)
+                }
+                override fun onError(error: Throwable) {}
+            }
+        )
+    }
+
+    private fun handleFloatingAiResponse(message: com.floatoverlay.app.model.Message) {
+        val toolCall = message.toolCall
+        if (toolCall != null) {
+            ConversationRepository(this).addMessage(message)
+            val tool = com.floatoverlay.app.ai.ToolRegistry.get(toolCall.toolName)
+            val result = tool?.execute(toolCall.arguments)
+                ?: com.floatoverlay.app.ai.ToolExecutionResult.Error("Tool not found")
+            ConversationRepository(this).addMessage(
+                com.floatoverlay.app.model.Message(
+                    role = com.floatoverlay.app.model.Message.Role.TOOL,
+                    content = result.asText(),
+                    toolResult = com.floatoverlay.app.model.Message.ToolResult(
+                        toolName = toolCall.toolName,
+                        success = result is com.floatoverlay.app.ai.ToolExecutionResult.Success,
+                        message = result.asText()
+                    )
+                )
+            )
+        } else {
+            ConversationRepository(this).addMessage(message)
+        }
+        aiAdapters.values.forEach { refreshAiChatAdapter(it) }
+        // If a project was created or modified, refresh any open Minecraft overlays.
+        minecraftProjectIds.entries.forEach { (id, projectId) ->
+            overlayViews[id]?.let { refreshMinecraftView(it.findViewWithTag("overlayMinecraftView"), projectId) }
+        }
+    }
+
+    private fun registerWorkspaceTools() {
+        val projectRepo = ProjectRepository(this)
+        com.floatoverlay.app.ai.ToolRegistry.register(
+            com.floatoverlay.app.ai.tool.CreateBuildProjectTool(projectRepo)
+        )
+        com.floatoverlay.app.ai.ToolRegistry.register(
+            com.floatoverlay.app.ai.tool.AddMaterialTool(projectRepo)
+        )
+        com.floatoverlay.app.ai.ToolRegistry.register(
+            com.floatoverlay.app.ai.tool.AddBuildStepTool(projectRepo)
+        )
+    }
+
     private fun isCameraUrl(url: String): Boolean = url.startsWith("camera://")
 
     private inner class ServiceLifecycleOwner : LifecycleOwner {
@@ -1060,6 +1345,7 @@ class FloatOverlayService : Service() {
         const val EXTRA_AMOUNT = "amount"
         const val EXTRA_OVERLAY_ID = "overlay_id"
         const val EXTRA_SKIP_CAMERA = "skip_camera"
+        const val EXTRA_PROJECT_ID = "project_id"
 
         fun incrementBadge(context: Context, category: NotificationCounter.Category, amount: Int = 1) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
@@ -1099,6 +1385,35 @@ class FloatOverlayService : Service() {
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
+
+        fun openFloatingAI(context: Context) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_OPEN_FLOATING_AI
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun openFloatingMinecraftProject(context: Context, projectId: String) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_OPEN_FLOATING_MINECRAFT
+                putExtra(EXTRA_PROJECT_ID, projectId)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun refreshMinecraftOverlays(context: Context) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_REFRESH_MINECRAFT_OVERLAYS
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        private const val ACTION_OPEN_FLOATING_AI = "com.floatoverlay.app.OPEN_FLOATING_AI"
+        private const val ACTION_OPEN_FLOATING_MINECRAFT = "com.floatoverlay.app.OPEN_FLOATING_MINECRAFT"
+        private const val ACTION_REFRESH_MINECRAFT_OVERLAYS = "com.floatoverlay.app.REFRESH_MINECRAFT_OVERLAYS"
+
+        private const val AI_OVERLAY_ID = "float_ai"
+        private const val MINECRAFT_OVERLAY_PREFIX = "float_minecraft_"
 
         private const val SAMPLE_OVERLAY_HTML = """
             <!DOCTYPE html>

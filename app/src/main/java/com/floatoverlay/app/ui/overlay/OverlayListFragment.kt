@@ -123,10 +123,12 @@ class OverlayListFragment : Fragment(), OverlayAdapter.OverlayListener {
     }
 
     private fun getSortedOverlays(): List<OverlayConfig> {
-        return repository.getOverlays().sortedWith(
-            compareByDescending<OverlayConfig> { it.zIndex }
-                .thenBy { it.id }
-        )
+        return repository.getOverlays()
+            .filter { it.resolvedType() == OverlayConfig.Type.WEB || it.resolvedType() == OverlayConfig.Type.CAMERA }
+            .sortedWith(
+                compareByDescending<OverlayConfig> { it.zIndex }
+                    .thenBy { it.id }
+            )
     }
 
     private fun migrateZIndex() {

@@ -80,8 +80,10 @@ class MainActivity : AppCompatActivity() {
         TabLayoutMediator(tabLayout, viewPager) { tab, position ->
             tab.text = when (position) {
                 0 -> "Overlays"
-                1 -> "Logs"
-                2 -> "Game"
+                1 -> "AI"
+                2 -> "Minecraft"
+                3 -> "Logs"
+                4 -> "Game"
                 else -> ""
             }
         }.attach()

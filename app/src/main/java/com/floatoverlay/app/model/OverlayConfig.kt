@@ -6,6 +6,7 @@ data class OverlayConfig(
     val id: String,
     val name: String,
     val url: String,
+    val type: Type = Type.WEB,
     val enabled: Boolean = true,
     val widthDp: Int = 240,
     val heightDp: Int = 160,
@@ -27,11 +28,32 @@ data class OverlayConfig(
     val cameraFilter: String = "normal",
     val cameraFlip: Boolean = true
 ) {
+    enum class Type {
+        WEB,
+        CAMERA,
+        AI_CHAT,
+        MINECRAFT_PROJECT
+    }
+
+    /** Compatibility: camera URLs are implicitly the CAMERA type. */
+    fun resolvedType(): Type = when {
+        type != Type.WEB -> type
+        url.startsWith("camera://") -> Type.CAMERA
+        url.startsWith("float://") -> {
+            when {
+                url == "float://ai" -> Type.AI_CHAT
+                url.startsWith("float://minecraft/") -> Type.MINECRAFT_PROJECT
+                else -> Type.WEB
+            }
+        }
+        else -> Type.WEB
+    }
     fun toJson(): JSONObject {
         return JSONObject().apply {
             put("id", id)
             put("name", name)
             put("url", url)
+            put("type", type.name)
             put("enabled", enabled)
             put("widthDp", widthDp)
             put("heightDp", heightDp)
@@ -61,6 +83,11 @@ data class OverlayConfig(
                 id = json.optString("id", System.currentTimeMillis().toString()),
                 name = json.optString("name", "Untitled"),
                 url = json.optString("url", ""),
+                type = try {
+                    Type.valueOf(json.optString("type", "WEB"))
+                } catch (e: Exception) {
+                    Type.WEB
+                },
                 enabled = json.optBoolean("enabled", true),
                 widthDp = json.optInt("widthDp", 240),
                 heightDp = json.optInt("heightDp", 160),
