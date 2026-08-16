@@ -60,7 +60,7 @@ class OpenAICompatibleProvider(
                     obj.put("content", msg.content)
                     val calls = JSONArray()
                     val callObj = JSONObject()
-                    callObj.put("id", "call_${System.currentTimeMillis()}")
+                    callObj.put("id", msg.toolCall.toolCallId.takeIf { it.isNotBlank() } ?: "call_${System.currentTimeMillis()}")
                     callObj.put("type", "function")
                     callObj.put("function", JSONObject().apply {
                         put("name", msg.toolCall.toolName)
@@ -71,7 +71,7 @@ class OpenAICompatibleProvider(
                 }
                 msg.toolResult != null -> {
                     obj.put("content", msg.content)
-                    obj.put("tool_call_id", "call_${msg.toolResult.toolName}")
+                    obj.put("tool_call_id", msg.toolResult.toolCallId.takeIf { it.isNotBlank() } ?: "call_${msg.toolResult.toolName}")
                 }
                 else -> obj.put("content", msg.content)
             }
@@ -138,6 +138,7 @@ class OpenAICompatibleProvider(
                 content = content
             )
             val toolName = function.optString("name", "")
+            val toolCallId = call.optString("id", "call_${System.currentTimeMillis()}")
             val argumentsString = function.optString("arguments", "{}")
             val argumentsJson = JSONObject(argumentsString)
             val arguments = mutableMapOf<String, String>()
@@ -147,7 +148,11 @@ class OpenAICompatibleProvider(
             return Message(
                 role = Message.Role.ASSISTANT,
                 content = content.takeIf { it.isNotBlank() } ?: "I'll use the $toolName tool.",
-                toolCall = Message.ToolCall(toolName = toolName, arguments = arguments)
+                toolCall = Message.ToolCall(
+                    toolName = toolName,
+                    arguments = arguments,
+                    toolCallId = toolCallId
+                )
             )
         }
 

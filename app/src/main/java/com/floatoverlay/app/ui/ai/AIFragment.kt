@@ -1,5 +1,8 @@
 package com.floatoverlay.app.ui.ai
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -55,6 +58,7 @@ class AIFragment : Fragment() {
     private lateinit var clearButton: ImageButton
     private lateinit var floatButton: ImageButton
     private lateinit var settingsButton: ImageButton
+    private lateinit var copyButton: ImageButton
 
     private var isLoading = false
 
@@ -87,6 +91,7 @@ class AIFragment : Fragment() {
         clearButton = view.findViewById(R.id.clearChatButton)
         floatButton = view.findViewById(R.id.openFloatAiButton)
         settingsButton = view.findViewById(R.id.aiSettingsButton)
+        copyButton = view.findViewById(R.id.copyChatButton)
 
         adapter = ChatAdapter()
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
@@ -99,6 +104,7 @@ class AIFragment : Fragment() {
         clearButton.setOnClickListener { confirmClear() }
         floatButton.setOnClickListener { openFloatingAI() }
         settingsButton.setOnClickListener { showSettingsDialog() }
+        copyButton.setOnClickListener { copyConversationToClipboard() }
     }
 
     override fun onResume() {
@@ -170,7 +176,8 @@ class AIFragment : Fragment() {
                     toolResult = Message.ToolResult(
                         toolName = toolCall.toolName,
                         success = result is ToolExecutionResult.Success,
-                        message = result.asText()
+                        message = result.asText(),
+                        toolCallId = toolCall.toolCallId
                     )
                 )
             )
@@ -203,6 +210,24 @@ class AIFragment : Fragment() {
 
     private fun openFloatingAI() {
         FloatOverlayService.toggleFloatingAI(requireContext())
+    }
+
+    private fun copyConversationToClipboard() {
+        val conversation = conversationRepository.getConversation()
+        val text = conversation.messages
+            .filter { it.role != Message.Role.SYSTEM }
+            .joinToString("\n\n") { msg ->
+                val prefix = when (msg.role) {
+                    Message.Role.USER -> "me:"
+                    Message.Role.ASSISTANT -> "float:"
+                    Message.Role.TOOL -> "tool:"
+                    else -> "${msg.role.name.lowercase()}:"
+                }
+                "$prefix ${msg.content}"
+            }
+        val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Float AI conversation", text))
+        Toast.makeText(requireContext(), "Conversation copied", Toast.LENGTH_SHORT).show()
     }
 
     private fun showSettingsDialog() {

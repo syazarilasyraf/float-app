@@ -540,6 +540,10 @@ class FloatOverlayService : Service() {
             gravity = Gravity.TOP or Gravity.START
             this.x = x
             this.y = y
+            if (config.resolvedType() == OverlayConfig.Type.AI_CHAT) {
+                // Let the overlay resize/pan correctly when the soft keyboard appears.
+                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            }
         }
     }
 
@@ -1426,9 +1430,13 @@ class FloatOverlayService : Service() {
     }
 
     private fun refreshAiChatAdapter(adapter: ChatAdapter?) {
-        adapter ?: return
-        val conversation = ConversationRepository(this).getConversation()
-        adapter.submitList(conversation.messages)
+        try {
+            adapter ?: return
+            val conversation = ConversationRepository(this).getConversation()
+            adapter.submitList(conversation.messages)
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "refreshAiChatAdapter failed", e)
+        }
     }
 
     private fun sendFloatingAiMessage(text: String) {
@@ -1461,30 +1469,35 @@ class FloatOverlayService : Service() {
     }
 
     private fun handleFloatingAiResponse(message: com.floatoverlay.app.model.Message) {
-        val toolCall = message.toolCall
-        if (toolCall != null) {
-            ConversationRepository(this).addMessage(message)
-            val tool = com.floatoverlay.app.ai.ToolRegistry.get(toolCall.toolName)
-            val result = tool?.execute(toolCall.arguments)
-                ?: com.floatoverlay.app.ai.ToolExecutionResult.Error("Tool not found")
-            ConversationRepository(this).addMessage(
-                com.floatoverlay.app.model.Message(
-                    role = com.floatoverlay.app.model.Message.Role.TOOL,
-                    content = result.asText(),
-                    toolResult = com.floatoverlay.app.model.Message.ToolResult(
-                        toolName = toolCall.toolName,
-                        success = result is com.floatoverlay.app.ai.ToolExecutionResult.Success,
-                        message = result.asText()
+        try {
+            val toolCall = message.toolCall
+            if (toolCall != null) {
+                ConversationRepository(this).addMessage(message)
+                val tool = com.floatoverlay.app.ai.ToolRegistry.get(toolCall.toolName)
+                val result = tool?.execute(toolCall.arguments)
+                    ?: com.floatoverlay.app.ai.ToolExecutionResult.Error("Tool not found")
+                ConversationRepository(this).addMessage(
+                    com.floatoverlay.app.model.Message(
+                        role = com.floatoverlay.app.model.Message.Role.TOOL,
+                        content = result.asText(),
+                        toolResult = com.floatoverlay.app.model.Message.ToolResult(
+                            toolName = toolCall.toolName,
+                            success = result is com.floatoverlay.app.ai.ToolExecutionResult.Success,
+                            message = result.asText(),
+                            toolCallId = toolCall.toolCallId
+                        )
                     )
                 )
-            )
-        } else {
-            ConversationRepository(this).addMessage(message)
-        }
-        aiAdapters.values.forEach { refreshAiChatAdapter(it) }
-        // If a project was created or modified, refresh any open Minecraft overlays.
-        minecraftProjectIds.entries.forEach { (id, projectId) ->
-            overlayViews[id]?.let { refreshMinecraftView(it.findViewWithTag("overlayMinecraftView"), projectId) }
+            } else {
+                ConversationRepository(this).addMessage(message)
+            }
+            aiAdapters.values.forEach { refreshAiChatAdapter(it) }
+            // If a project was created or modified, refresh any open Minecraft overlays.
+            minecraftProjectIds.entries.forEach { (id, projectId) ->
+                overlayViews[id]?.let { refreshMinecraftView(it.findViewWithTag("overlayMinecraftView"), projectId) }
+            }
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "handleFloatingAiResponse failed", e)
         }
     }
 

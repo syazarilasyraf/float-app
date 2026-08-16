@@ -36,6 +36,14 @@
             android:src="@android:drawable/ic_menu_preferences" />
 
         <ImageButton
+            android:id="@+id/copyChatButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Copy conversation"
+            android:src="@drawable/ic_copy" />
+
+        <ImageButton
             android:id="@+id/clearChatButton"
             android:layout_width="40dp"
             android:layout_height="40dp"

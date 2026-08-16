@@ -27,10 +27,12 @@ data class Message(
 
     data class ToolCall(
         val toolName: String,
-        val arguments: Map<String, String>
+        val arguments: Map<String, String>,
+        val toolCallId: String = ""
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("toolName", toolName)
+            put("toolCallId", toolCallId)
             val args = JSONObject()
             arguments.forEach { (key, value) -> args.put(key, value) }
             put("arguments", args)
@@ -45,7 +47,8 @@ data class Message(
                         map[key] = args.optString(key, "")
                     }
                     map
-                } ?: emptyMap()
+                } ?: emptyMap(),
+                toolCallId = json.optString("toolCallId", "")
             )
         }
     }
@@ -53,19 +56,22 @@ data class Message(
     data class ToolResult(
         val toolName: String,
         val success: Boolean,
-        val message: String
+        val message: String,
+        val toolCallId: String = ""
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("toolName", toolName)
             put("success", success)
             put("message", message)
+            put("toolCallId", toolCallId)
         }
 
         companion object {
             fun fromJson(json: JSONObject): ToolResult = ToolResult(
                 toolName = json.optString("toolName", ""),
                 success = json.optBoolean("success", false),
-                message = json.optString("message", "")
+                message = json.optString("message", ""),
+                toolCallId = json.optString("toolCallId", "")
             )
         }
     }
