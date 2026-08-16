@@ -152,6 +152,10 @@ class FloatOverlayService : Service() {
                 LogStore.log(TAG, "Open floating AI command received")
                 openFloatingAI()
             }
+            ACTION_TOGGLE_FLOATING_AI -> {
+                LogStore.log(TAG, "Toggle floating AI command received")
+                toggleFloatingAI()
+            }
             ACTION_OPEN_FLOATING_MINECRAFT -> {
                 val projectId = intent.getStringExtra(EXTRA_PROJECT_ID) ?: ""
                 LogStore.log(TAG, "Open floating Minecraft command received, project=$projectId")
@@ -346,6 +350,17 @@ class FloatOverlayService : Service() {
         bringIconToFront()
     }
 
+    private fun toggleFloatingAI() {
+        val view = overlayViews[AI_OVERLAY_ID]
+        if (view != null && view.visibility == View.VISIBLE) {
+            view.visibility = View.GONE
+            isExpanded = overlayViews.values.any { it.visibility == View.VISIBLE }
+            LogStore.log(TAG, "Floating AI hidden via toggle")
+        } else {
+            openFloatingAI()
+        }
+    }
+
     private fun openFloatingMinecraft(projectId: String) {
         val overlayId = "$MINECRAFT_OVERLAY_PREFIX$projectId"
         if (overlayViews.containsKey(overlayId)) {
@@ -494,8 +509,15 @@ class FloatOverlayService : Service() {
     }
 
     private fun createOverlayParams(config: OverlayConfig, x: Int, y: Int): WindowManager.LayoutParams {
-        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        var flags = WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        // AI chat needs focus so the EditText can show the soft keyboard.
+        // Other overlays stay non-focusable by default.
+        if (config.resolvedType() != OverlayConfig.Type.AI_CHAT) {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        } else {
+            // Let touches outside the chat bubble pass through to the app underneath.
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        }
         if (config.touchThrough) {
             flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         }
@@ -1544,6 +1566,13 @@ class FloatOverlayService : Service() {
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
 
+        fun toggleFloatingAI(context: Context) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_TOGGLE_FLOATING_AI
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
         fun openFloatingMinecraftProject(context: Context, projectId: String) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
                 action = ACTION_OPEN_FLOATING_MINECRAFT
@@ -1569,6 +1598,7 @@ class FloatOverlayService : Service() {
         }
 
         private const val ACTION_OPEN_FLOATING_AI = "com.floatoverlay.app.OPEN_FLOATING_AI"
+        private const val ACTION_TOGGLE_FLOATING_AI = "com.floatoverlay.app.TOGGLE_FLOATING_AI"
         private const val ACTION_OPEN_FLOATING_MINECRAFT = "com.floatoverlay.app.OPEN_FLOATING_MINECRAFT"
         private const val ACTION_REFRESH_MINECRAFT_OVERLAYS = "com.floatoverlay.app.REFRESH_MINECRAFT_OVERLAYS"
 

@@ -180,7 +180,7 @@ class AIFragment : Fragment() {
     }
 
     private fun openFloatingAI() {
-        FloatOverlayService.openFloatingAI(requireContext())
+        FloatOverlayService.toggleFloatingAI(requireContext())
     }
 
     private fun createProvider(name: String): AIProvider {
