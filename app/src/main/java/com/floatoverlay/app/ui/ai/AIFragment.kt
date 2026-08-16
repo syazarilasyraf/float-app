@@ -219,7 +219,7 @@ class AIFragment : Fragment() {
         )
         providerSpinner.setSelection(providers.indexOf(settingsRepository.getSelectedProviderName()).coerceAtLeast(0))
 
-        val models = listOf("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k")
+        val models = listOf("k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed")
         modelSpinner.adapter = ArrayAdapter(
             requireContext(),
             android.R.layout.simple_spinner_dropdown_item,

@@ -23,7 +23,7 @@ class SettingsRepository(context: Context) {
     }
 
     fun getKimiModel(): String {
-        return prefs.getString(KEY_KIMI_MODEL, "moonshot-v1-8k") ?: "moonshot-v1-8k"
+        return prefs.getString(KEY_KIMI_MODEL, "k3") ?: "k3"
     }
 
     fun setKimiModel(model: String) {

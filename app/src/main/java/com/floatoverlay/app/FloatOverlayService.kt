@@ -325,30 +325,35 @@ class FloatOverlayService : Service() {
     }
 
     private fun openFloatingAI() {
-        if (overlayViews.containsKey(AI_OVERLAY_ID)) {
-            overlayViews[AI_OVERLAY_ID]?.visibility = View.VISIBLE
+        try {
+            if (overlayViews.containsKey(AI_OVERLAY_ID)) {
+                overlayViews[AI_OVERLAY_ID]?.visibility = View.VISIBLE
+                isExpanded = true
+                bringIconToFront()
+                return
+            }
+
+            val config = repository.getOverlay(AI_OVERLAY_ID) ?: OverlayConfig(
+                id = AI_OVERLAY_ID,
+                name = "Float AI",
+                url = "float://ai",
+                type = OverlayConfig.Type.AI_CHAT,
+                widthDp = 320,
+                heightDp = 420,
+                opacityPercent = 95,
+                touchThrough = false,
+                posXPercent = 0.05f,
+                posYPercent = 0.15f
+            )
+            repository.addOrUpdate(config)
+            val screenSize = getScreenSize()
+            addOverlay(config, screenSize)
             isExpanded = true
             bringIconToFront()
-            return
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "openFloatingAI failed", e)
+            showToast("Float AI error: ${e.message}")
         }
-
-        val config = repository.getOverlay(AI_OVERLAY_ID) ?: OverlayConfig(
-            id = AI_OVERLAY_ID,
-            name = "Float AI",
-            url = "float://ai",
-            type = OverlayConfig.Type.AI_CHAT,
-            widthDp = 320,
-            heightDp = 420,
-            opacityPercent = 95,
-            touchThrough = false,
-            posXPercent = 0.05f,
-            posYPercent = 0.15f
-        )
-        repository.addOrUpdate(config)
-        val screenSize = getScreenSize()
-        addOverlay(config, screenSize)
-        isExpanded = true
-        bringIconToFront()
     }
 
     private fun toggleFloatingAI() {
@@ -1427,28 +1432,32 @@ class FloatOverlayService : Service() {
     }
 
     private fun sendFloatingAiMessage(text: String) {
-        ConversationRepository(this).addMessage(
-            com.floatoverlay.app.model.Message(
-                role = com.floatoverlay.app.model.Message.Role.USER,
-                content = text
+        try {
+            ConversationRepository(this).addMessage(
+                com.floatoverlay.app.model.Message(
+                    role = com.floatoverlay.app.model.Message.Role.USER,
+                    content = text
+                )
             )
-        )
-        aiAdapters.values.forEach { refreshAiChatAdapter(it) }
+            aiAdapters.values.forEach { refreshAiChatAdapter(it) }
 
-        // Use the same provider and tools as the in-app AI.
-        val provider = AIProviderFactory.create(this)
-        val conversation = ConversationRepository(this).getConversation()
-        provider.sendMessage(
-            conversation.messages,
-            com.floatoverlay.app.ai.ToolRegistry.all(),
-            object : com.floatoverlay.app.ai.AIProvider.AIResponseCallback {
-                override fun onLoading() {}
-                override fun onResult(message: com.floatoverlay.app.model.Message) {
-                    handleFloatingAiResponse(message)
+            // Use the same provider and tools as the in-app AI.
+            val provider = AIProviderFactory.create(this)
+            val conversation = ConversationRepository(this).getConversation()
+            provider.sendMessage(
+                conversation.messages,
+                com.floatoverlay.app.ai.ToolRegistry.all(),
+                object : com.floatoverlay.app.ai.AIProvider.AIResponseCallback {
+                    override fun onLoading() {}
+                    override fun onResult(message: com.floatoverlay.app.model.Message) {
+                        handleFloatingAiResponse(message)
+                    }
+                    override fun onError(error: Throwable) {}
                 }
-                override fun onError(error: Throwable) {}
-            }
-        )
+            )
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "sendFloatingAiMessage failed", e)
+        }
     }
 
     private fun handleFloatingAiResponse(message: com.floatoverlay.app.model.Message) {

@@ -29,8 +29,8 @@ object AIProviderFactory {
             return MockAIProvider()
         }
         return OpenAICompatibleProvider(
-            name = "Kimi",
-            baseUrl = "https://api.moonshot.cn/v1",
+            name = "Kimi Code",
+            baseUrl = "https://api.kimi.com/coding/v1",
             apiKey = apiKey,
             model = settings.getKimiModel()
         )
