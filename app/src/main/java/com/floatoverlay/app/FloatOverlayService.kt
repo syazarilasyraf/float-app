@@ -50,6 +50,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import com.floatoverlay.app.ai.AIProviderFactory
 import com.floatoverlay.app.ai.asText
 import com.floatoverlay.app.data.ConversationRepository
 import com.floatoverlay.app.data.ProjectRepository
@@ -1434,8 +1435,8 @@ class FloatOverlayService : Service() {
         )
         aiAdapters.values.forEach { refreshAiChatAdapter(it) }
 
-        // Use the same mock provider and tools as the in-app AI.
-        val provider = com.floatoverlay.app.ai.provider.MockAIProvider()
+        // Use the same provider and tools as the in-app AI.
+        val provider = AIProviderFactory.create(this)
         val conversation = ConversationRepository(this).getConversation()
         provider.sendMessage(
             conversation.messages,

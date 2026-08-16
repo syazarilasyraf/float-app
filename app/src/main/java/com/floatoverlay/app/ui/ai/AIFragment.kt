@@ -4,10 +4,12 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ProgressBar
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -17,15 +19,19 @@ import androidx.recyclerview.widget.RecyclerView
 import com.floatoverlay.app.FloatOverlayService
 import com.floatoverlay.app.R
 import com.floatoverlay.app.ai.AIProvider
-import com.floatoverlay.app.ai.AITool
+import com.floatoverlay.app.ai.AIProviderFactory
 import com.floatoverlay.app.ai.ToolExecutionResult
 import com.floatoverlay.app.ai.ToolRegistry
 import com.floatoverlay.app.ai.asText
 import com.floatoverlay.app.ai.provider.MockAIProvider
+import com.floatoverlay.app.ai.tool.AddBuildStepTool
+import com.floatoverlay.app.ai.tool.AddMaterialTool
+import com.floatoverlay.app.ai.tool.CreateBuildProjectTool
 import com.floatoverlay.app.data.ConversationRepository
 import com.floatoverlay.app.data.ProjectRepository
 import com.floatoverlay.app.data.SettingsRepository
 import com.floatoverlay.app.model.Message
+import com.google.android.material.textfield.TextInputEditText
 
 /**
  * In-app AI assistant chat.
@@ -48,6 +54,7 @@ class AIFragment : Fragment() {
     private lateinit var statusText: TextView
     private lateinit var clearButton: ImageButton
     private lateinit var floatButton: ImageButton
+    private lateinit var settingsButton: ImageButton
 
     private var isLoading = false
 
@@ -57,7 +64,7 @@ class AIFragment : Fragment() {
         conversationRepository = ConversationRepository(context)
         projectRepository = ProjectRepository(context)
         settingsRepository = SettingsRepository(context)
-        provider = createProvider(settingsRepository.getSelectedProviderName())
+        provider = AIProviderFactory.create(context)
         registerTools()
     }
 
@@ -79,17 +86,32 @@ class AIFragment : Fragment() {
         statusText = view.findViewById(R.id.providerStatus)
         clearButton = view.findViewById(R.id.clearChatButton)
         floatButton = view.findViewById(R.id.openFloatAiButton)
+        settingsButton = view.findViewById(R.id.aiSettingsButton)
 
         adapter = ChatAdapter()
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
         recyclerView.adapter = adapter
 
-        statusText.text = "Provider: ${provider.name}"
+        updateStatus()
         refreshMessages()
 
         sendButton.setOnClickListener { sendMessage() }
         clearButton.setOnClickListener { confirmClear() }
         floatButton.setOnClickListener { openFloatingAI() }
+        settingsButton.setOnClickListener { showSettingsDialog() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Provider may have changed in settings.
+        provider = AIProviderFactory.create(requireContext())
+        updateStatus()
+    }
+
+    private fun updateStatus() {
+        val hasKey = !AIProviderFactory.getKimiApiKey(requireContext()).isNullOrBlank()
+        val keyHint = if (hasKey) "key set" else "no key"
+        statusText.text = "Provider: ${provider.name} ($keyHint)"
     }
 
     private fun refreshMessages() {
@@ -183,16 +205,56 @@ class AIFragment : Fragment() {
         FloatOverlayService.toggleFloatingAI(requireContext())
     }
 
-    private fun createProvider(name: String): AIProvider {
-        return when (name.lowercase()) {
-            "mock" -> MockAIProvider()
-            else -> MockAIProvider()
-        }
+    private fun showSettingsDialog() {
+        val view = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_ai_settings, null)
+        val providerSpinner = view.findViewById<Spinner>(R.id.providerSpinner)
+        val keyInput = view.findViewById<TextInputEditText>(R.id.apiKeyInput)
+        val modelSpinner = view.findViewById<Spinner>(R.id.modelSpinner)
+
+        val providers = listOf(SettingsRepository.PROVIDER_MOCK, SettingsRepository.PROVIDER_KIMI)
+        providerSpinner.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_dropdown_item,
+            providers
+        )
+        providerSpinner.setSelection(providers.indexOf(settingsRepository.getSelectedProviderName()).coerceAtLeast(0))
+
+        val models = listOf("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k")
+        modelSpinner.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_dropdown_item,
+            models
+        )
+        modelSpinner.setSelection(models.indexOf(settingsRepository.getKimiModel()).coerceAtLeast(0))
+
+        // Pre-fill key is hidden for security; user can paste a new one to update.
+        keyInput.hint = "Paste Kimi API key (optional)"
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("AI Provider Settings")
+            .setView(view)
+            .setPositiveButton("Save") { _, _ ->
+                val selectedProvider = providerSpinner.selectedItem as String
+                val newKey = keyInput.text.toString().trim()
+                val selectedModel = modelSpinner.selectedItem as String
+
+                settingsRepository.setSelectedProviderName(selectedProvider)
+                settingsRepository.setKimiModel(selectedModel)
+                if (newKey.isNotBlank()) {
+                    AIProviderFactory.saveKimiApiKey(requireContext(), newKey)
+                }
+
+                provider = AIProviderFactory.create(requireContext())
+                updateStatus()
+                Toast.makeText(requireContext(), "Provider updated", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun registerTools() {
-        ToolRegistry.register(com.floatoverlay.app.ai.tool.CreateBuildProjectTool(projectRepository))
-        ToolRegistry.register(com.floatoverlay.app.ai.tool.AddMaterialTool(projectRepository))
-        ToolRegistry.register(com.floatoverlay.app.ai.tool.AddBuildStepTool(projectRepository))
+        ToolRegistry.register(CreateBuildProjectTool(projectRepository))
+        ToolRegistry.register(AddMaterialTool(projectRepository))
+        ToolRegistry.register(AddBuildStepTool(projectRepository))
     }
 }

@@ -24,8 +24,16 @@
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Open floating AI"
+            android:contentDescription="Toggle floating AI"
             android:src="@drawable/ic_overlay" />
+
+        <ImageButton
+            android:id="@+id/aiSettingsButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="AI settings"
+            android:src="@android:drawable/ic_menu_preferences" />
 
         <ImageButton
             android:id="@+id/clearChatButton"
