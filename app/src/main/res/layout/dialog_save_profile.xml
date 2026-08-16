@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Profile name">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/profileNameInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Orientation"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <RadioGroup
+        android:id="@+id/profileOrientationGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/profileOrientationPortrait"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Portrait" />
+
+        <RadioButton
+            android:id="@+id/profileOrientationLandscape"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Landscape" />
+
+        <RadioButton
+            android:id="@+id/profileOrientationAny"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="Any" />
+
+    </RadioGroup>
+
+</LinearLayout>

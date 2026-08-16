@@ -17,14 +17,17 @@ import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.floatoverlay.app.FloatOverlayService
 import com.floatoverlay.app.LogStore
 import com.floatoverlay.app.PresetRepository
+import com.floatoverlay.app.ProfileRepository
 import com.floatoverlay.app.R
 import com.floatoverlay.app.model.WindowPreset
 
 class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
 
     private lateinit var repository: PresetRepository
+    private lateinit var profileRepository: ProfileRepository
     private lateinit var adapter: PresetAdapter
     private lateinit var recyclerView: RecyclerView
     private lateinit var addButton: Button
@@ -32,6 +35,7 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = PresetRepository(requireContext())
+        profileRepository = ProfileRepository(requireContext())
     }
 
     override fun onCreateView(
@@ -145,6 +149,20 @@ class GameLauncherFragment : Fragment(), PresetAdapter.PresetListener {
             "Starting Clash Royale preset=${preset.name} fullscreen=${preset.isFullscreen}"
         )
         startActivity(intent, optionsBundle)
+
+        applyLinkedProfile(preset)
+    }
+
+    private fun applyLinkedProfile(preset: WindowPreset) {
+        val linkedName = preset.linkedProfileName
+        if (linkedName.isBlank()) return
+        val profile = profileRepository.findByName(linkedName)
+        if (profile != null) {
+            LogStore.log("GameLauncher", "Applying linked profile \"$linkedName\" for preset \"${preset.name}\"")
+            FloatOverlayService.applyProfile(requireContext(), profile.id)
+        } else {
+            LogStore.log("GameLauncher", "No profile named \"$linkedName\" found for preset \"${preset.name}\"")
+        }
     }
 
     private fun resolveLaunchIntent(packageManager: PackageManager): Pair<Intent, String>? {

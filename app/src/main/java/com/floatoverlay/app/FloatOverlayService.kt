@@ -9,16 +9,20 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.Display
+import android.view.Surface
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -59,6 +63,7 @@ class FloatOverlayService : Service() {
     private var iconView: View? = null
     private var badgeCounter: TextView? = null
     private lateinit var repository: OverlayRepository
+    private lateinit var profileRepository: ProfileRepository
     private lateinit var counter: NotificationCounter
 
     private val overlayViews = mutableMapOf<String, FrameLayout>()
@@ -73,6 +78,10 @@ class FloatOverlayService : Service() {
     private val cameraUseCases = mutableMapOf<String, Preview>()
     private val serviceLifecycleOwner = ServiceLifecycleOwner()
     private var skipCameraOverlays = false
+
+    private var displayManager: DisplayManager? = null
+    private var displayListener: DisplayManager.DisplayListener? = null
+    private var currentDisplayRotation: Int = Surface.ROTATION_0
 
     private var initialX = 0
     private var initialY = 0
@@ -92,7 +101,10 @@ class FloatOverlayService : Service() {
         LogStore.log(TAG, "Service onCreate")
         registerWorkspaceTools()
         repository = OverlayRepository(this)
+        profileRepository = ProfileRepository(this)
         counter = NotificationCounter(repository)
+        displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        currentDisplayRotation = displayManager?.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0
         serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_CREATE)
         serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_START)
         serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_RESUME)
@@ -148,6 +160,14 @@ class FloatOverlayService : Service() {
             ACTION_REFRESH_MINECRAFT_OVERLAYS -> {
                 refreshMinecraftOverlays()
             }
+            ACTION_APPLY_PROFILE -> {
+                val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
+                val isManual = intent?.getBooleanExtra(EXTRA_PROFILE_MANUAL, true) ?: true
+                LogStore.log(TAG, "Apply profile command received, id=$profileId manual=$isManual")
+                if (profileId != null) {
+                    applyProfile(profileId, isManual)
+                }
+            }
         }
         return START_STICKY
     }
@@ -161,6 +181,8 @@ class FloatOverlayService : Service() {
         } catch (e: Exception) {
             LogStore.logError(TAG, "Camera unbind on destroy failed", e)
         }
+        displayListener?.let { displayManager?.unregisterDisplayListener(it) }
+        displayListener = null
         serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_PAUSE)
         serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_STOP)
         serviceLifecycleOwner.handleEvent(Lifecycle.Event.ON_DESTROY)
@@ -208,8 +230,8 @@ class FloatOverlayService : Service() {
         windowManager = windowManager ?: getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         val params = WindowManager.LayoutParams(
-            dpToPx(36),
-            dpToPx(36),
+            dpToPx(20),
+            dpToPx(20),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
@@ -281,6 +303,7 @@ class FloatOverlayService : Service() {
             reorderOverlays()
             isExpanded = true
             bringIconToFront()
+            updateOrientationListener()
             clearBadge()
         } catch (e: Exception) {
             LogStore.logError(TAG, "showOverlays failed", e)
@@ -293,6 +316,7 @@ class FloatOverlayService : Service() {
         LogStore.log(TAG, "Hiding overlays")
         overlayViews.values.forEach { it.visibility = View.GONE }
         isExpanded = false
+        updateOrientationListener()
     }
 
     private fun openFloatingAI() {
@@ -417,6 +441,7 @@ class FloatOverlayService : Service() {
                 val screenSize = getScreenSize()
                 addOverlay(newConfig, screenSize)
                 bringIconToFront()
+                updateOrientationListener()
                 return
             }
 
@@ -432,6 +457,7 @@ class FloatOverlayService : Service() {
                 applyOverlayChanges(container, overlayParams[changedId]!!, oldConfig, newConfig)
                 lastConfigs[changedId] = newConfig
             }
+            updateOrientationListener()
         } catch (e: Exception) {
             LogStore.logError(TAG, "reloadOverlays failed", e)
         }
@@ -517,19 +543,6 @@ class FloatOverlayService : Service() {
             else -> addWebContent(container, config)
         }
 
-        val minimizeButton = TextView(this).apply {
-            tag = "minimizeButton"
-            text = "−"
-            textSize = 24f
-            setTextColor(0xFFFFFFFF.toInt())
-            gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(dpToPx(28), dpToPx(28)).apply {
-                gravity = Gravity.TOP or Gravity.END
-                setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
-            }
-        }
-        container.addView(minimizeButton)
-
         val resizeHandle = View(this).apply {
             tag = "resizeHandle"
             background = getDrawable(R.drawable.resize_handle)
@@ -564,8 +577,6 @@ class FloatOverlayService : Service() {
             }
         )
 
-        val minimizeButton = container.findViewWithTag<View>("minimizeButton")
-        minimizeButton?.setOnClickListener(if (!isTouchThrough) { _ -> hideOverlays() } else null)
     }
 
     private fun applyZoom(webView: WebView, config: OverlayConfig) {
@@ -621,6 +632,136 @@ class FloatOverlayService : Service() {
         return if (front && !flip) -1f else 1f
     }
 
+    private fun getTargetRotation(config: OverlayConfig): Int {
+        return when (config.cameraRotation) {
+            "0" -> Surface.ROTATION_0
+            "90" -> Surface.ROTATION_90
+            "180" -> Surface.ROTATION_180
+            "270" -> Surface.ROTATION_270
+            else -> currentDisplayRotation
+        }
+    }
+
+    private fun createDisplayListener(): DisplayManager.DisplayListener {
+        return object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {}
+            override fun onDisplayRemoved(displayId: Int) {}
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId == Display.DEFAULT_DISPLAY) {
+                    val rotation = displayManager?.getDisplay(displayId)?.rotation ?: return
+                    if (rotation != currentDisplayRotation) {
+                        currentDisplayRotation = rotation
+                        updateAllCameraRotations()
+                        maybeAutoApplyProfileOnRotation()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateOrientationListener() {
+        val hasVisibleCamera = overlayViews.any { (id, container) ->
+            container.visibility == View.VISIBLE && isCameraUrl(lastConfigs[id]?.url ?: repository.getOverlay(id)?.url ?: "")
+        }
+        if (hasVisibleCamera && displayListener == null) {
+            displayListener = createDisplayListener().also {
+                displayManager?.registerDisplayListener(it, null)
+                LogStore.log(TAG, "Registered display orientation listener")
+            }
+        } else if (!hasVisibleCamera && displayListener != null) {
+            displayListener?.let { displayManager?.unregisterDisplayListener(it) }
+            displayListener = null
+            LogStore.log(TAG, "Unregistered display orientation listener")
+        }
+    }
+
+    private fun updateAllCameraRotations() {
+        overlayViews.keys.forEach { id ->
+            val config = lastConfigs[id] ?: repository.getOverlay(id) ?: return@forEach
+            if (isCameraUrl(config.url)) {
+                updateCameraRotation(id, config)
+            }
+        }
+    }
+
+    private fun updateCameraRotation(id: String, config: OverlayConfig) {
+        val preview = cameraUseCases[id] ?: return
+        val container = overlayViews[id] ?: return
+        val rotation = getTargetRotation(config)
+        try {
+            preview.targetRotation = rotation
+            applyCameraShape(container, config)
+            LogStore.log(TAG, "Updated camera rotation for ${config.name}: ${rotationToLabel(rotation)} (mode=${config.cameraRotation})")
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Failed to update camera rotation for ${config.name}", e)
+        }
+    }
+
+    private fun rotationToLabel(rotation: Int): String = when (rotation) {
+        Surface.ROTATION_0 -> "0°"
+        Surface.ROTATION_90 -> "90°"
+        Surface.ROTATION_180 -> "180°"
+        Surface.ROTATION_270 -> "270°"
+        else -> "?"
+    }
+
+    private fun getCurrentOrientationLabel(): String {
+        return when (resources.configuration.orientation) {
+            Configuration.ORIENTATION_LANDSCAPE -> "landscape"
+            else -> "portrait"
+        }
+    }
+
+    private fun maybeAutoApplyProfileOnRotation() {
+        if (!profileRepository.isAutoApplyOnRotationEnabled()) return
+        val lastManual = profileRepository.getLastManualApplyTime()
+        if (System.currentTimeMillis() - lastManual < 10_000L) {
+            LogStore.log(TAG, "Auto-apply on rotation skipped: within 10s of manual apply")
+            return
+        }
+        val orientation = getCurrentOrientationLabel()
+        val candidates = profileRepository.getProfiles().filter {
+            it.orientation == orientation || it.orientation == "any"
+        }
+        if (candidates.isEmpty()) return
+        val profile = if (candidates.size == 1) {
+            candidates.first()
+        } else {
+            // Most recently created/applied wins. Creation order is implicit in the list,
+            // but to prefer recently applied we don't have a timestamp. Use the last one in
+            // the saved list as a simple "most recent" proxy.
+            candidates.last()
+        }
+        LogStore.log(TAG, "Auto-applying profile \"${profile.name}\" on rotation to $orientation")
+        applyProfile(profile.id, isManual = false)
+    }
+
+    private fun applyProfile(profileId: String, isManual: Boolean) {
+        val profile = profileRepository.getProfile(profileId) ?: run {
+            LogStore.log(TAG, "Profile not found: $profileId")
+            return
+        }
+        // Deep copy so the service and repository don't share mutable references.
+        val snapshot = profile.overlays.map { it.copy() }
+        repository.saveOverlays(snapshot)
+        if (isManual) {
+            profileRepository.recordManualApplyTime()
+        }
+        LogStore.log(TAG, "Applied profile \"${profile.name}\" with ${snapshot.size} overlays")
+        fullReloadOverlays()
+    }
+
+    private fun fullReloadOverlays() {
+        // Remove all existing overlay views and recreate them from the repository.
+        overlayViews.keys.toList().forEach { id ->
+            removeOverlayView(id)
+            lastConfigs.remove(id)
+        }
+        if (isExpanded) {
+            showOverlays()
+        }
+    }
+
     private fun bindCamera(config: OverlayConfig, previewView: PreviewView) {
         val lensFacing = getCameraLensFacing(config.url)
         previewView.scaleX = getCameraScaleX(config.url, config.cameraFlip)
@@ -635,7 +776,10 @@ class FloatOverlayService : Service() {
                 val preview = Preview.Builder()
                     .setTargetResolution(android.util.Size(1280, 720))
                     .build()
-                    .also { it.setSurfaceProvider(previewView.surfaceProvider) }
+                    .also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                        it.targetRotation = getTargetRotation(config)
+                    }
 
                 val cameraSelector = CameraSelector.Builder()
                     .requireLensFacing(lensFacing)
@@ -813,6 +957,10 @@ class FloatOverlayService : Service() {
                 val previewView = container.findViewWithTag<PreviewView>("overlayCameraView")
                 previewView?.scaleX = getCameraScaleX(newConfig.url, newConfig.cameraFlip)
                 LogStore.log(TAG, "Updated camera flip for ${newConfig.name}")
+            }
+            if (oldConfig.cameraRotation != newConfig.cameraRotation) {
+                updateCameraRotation(newConfig.id, newConfig)
+                LogStore.log(TAG, "Updated camera rotation mode for ${newConfig.name}: ${newConfig.cameraRotation}")
             }
             if (oldConfig.opacityPercent != newConfig.opacityPercent ||
                 oldConfig.touchThrough != newConfig.touchThrough
@@ -1341,11 +1489,14 @@ class FloatOverlayService : Service() {
         const val ACTION_RELOAD_OVERLAYS = "com.floatoverlay.app.RELOAD_OVERLAYS"
         const val ACTION_REFRESH_OVERLAY = "com.floatoverlay.app.REFRESH_OVERLAY"
         const val ACTION_REORDER_OVERLAYS = "com.floatoverlay.app.REORDER_OVERLAYS"
+        const val ACTION_APPLY_PROFILE = "com.floatoverlay.app.APPLY_PROFILE"
         const val EXTRA_CATEGORY = "category"
         const val EXTRA_AMOUNT = "amount"
         const val EXTRA_OVERLAY_ID = "overlay_id"
         const val EXTRA_SKIP_CAMERA = "skip_camera"
         const val EXTRA_PROJECT_ID = "project_id"
+        const val EXTRA_PROFILE_ID = "profile_id"
+        const val EXTRA_PROFILE_MANUAL = "profile_manual"
 
         fun incrementBadge(context: Context, category: NotificationCounter.Category, amount: Int = 1) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
@@ -1404,6 +1555,15 @@ class FloatOverlayService : Service() {
         fun refreshMinecraftOverlays(context: Context) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
                 action = ACTION_REFRESH_MINECRAFT_OVERLAYS
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun applyProfile(context: Context, profileId: String, manual: Boolean = true) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_APPLY_PROFILE
+                putExtra(EXTRA_PROFILE_ID, profileId)
+                putExtra(EXTRA_PROFILE_MANUAL, manual)
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }

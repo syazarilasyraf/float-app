@@ -23,6 +23,7 @@ object PresetEditDialog {
         val heightInput = view.findViewById<TextInputEditText>(R.id.presetHeightInput)
         val xInput = view.findViewById<TextInputEditText>(R.id.presetXInput)
         val yInput = view.findViewById<TextInputEditText>(R.id.presetYInput)
+        val linkedProfileInput = view.findViewById<TextInputEditText>(R.id.presetLinkedProfileInput)
 
         preset?.let {
             nameInput.setText(it.name)
@@ -30,6 +31,7 @@ object PresetEditDialog {
             heightInput.setText(it.heightPercent.toString())
             xInput.setText(it.xPercent.toString())
             yInput.setText(it.yPercent.toString())
+            linkedProfileInput.setText(it.linkedProfileName)
         } ?: run {
             widthInput.setText("90")
             heightInput.setText("78")
@@ -55,19 +57,22 @@ object PresetEditDialog {
                 val height = heightInput.text.toString().toIntOrNull()?.coerceIn(1, 100) ?: 78
                 val x = xInput.text.toString().toIntOrNull()?.coerceIn(0, 100) ?: 5
                 val y = yInput.text.toString().toIntOrNull()?.coerceIn(0, 100) ?: 2
+                val linkedProfileName = linkedProfileInput.text.toString().trim()
 
                 val updated = preset?.copy(
                     name = name,
                     widthPercent = width,
                     heightPercent = height,
                     xPercent = x,
-                    yPercent = y
+                    yPercent = y,
+                    linkedProfileName = linkedProfileName
                 ) ?: WindowPreset(
                     name = name,
                     widthPercent = width,
                     heightPercent = height,
                     xPercent = x,
-                    yPercent = y
+                    yPercent = y,
+                    linkedProfileName = linkedProfileName
                 )
 
                 onSave(updated)

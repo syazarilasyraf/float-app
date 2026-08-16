@@ -57,12 +57,19 @@ object OverlayEditDialog {
         val cameraShapeGroup = view.findViewById<RadioGroup>(R.id.cameraShapeGroup)
         val cameraFilterDropdown = view.findViewById<AutoCompleteTextView>(R.id.cameraFilterDropdown)
         val cameraFlipSwitch = view.findViewById<MaterialSwitch>(R.id.cameraFlipSwitch)
+        val cameraRotationDropdown = view.findViewById<AutoCompleteTextView>(R.id.cameraRotationDropdown)
 
         val filterOptions = listOf("normal", "mono", "sepia", "warm", "cool", "vivid", "fade")
         val filterDisplayOptions = listOf("Normal", "Mono", "Sepia", "Warm", "Cool", "Vivid", "Fade")
         val filterAdapter = ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, filterDisplayOptions)
         cameraFilterDropdown.setAdapter(filterAdapter)
         cameraFilterDropdown.setText(filterDisplayOptions[0], false)
+
+        val rotationOptions = listOf("auto", "0", "90", "180", "270")
+        val rotationDisplayOptions = listOf("Auto", "0°", "90°", "180°", "270°")
+        val rotationAdapter = ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, rotationDisplayOptions)
+        cameraRotationDropdown.setAdapter(rotationAdapter)
+        cameraRotationDropdown.setText(rotationDisplayOptions[0], false)
 
         fun isCameraUrl(url: String) = url.startsWith("camera://")
 
@@ -105,6 +112,8 @@ object OverlayEditDialog {
             cameraFlipSwitch.isChecked = it.cameraFlip
             val filterIndex = filterOptions.indexOf(it.cameraFilter).coerceAtLeast(0)
             cameraFilterDropdown.setText(filterDisplayOptions[filterIndex], false)
+            val rotationIndex = rotationOptions.indexOf(it.cameraRotation).coerceAtLeast(0)
+            cameraRotationDropdown.setText(rotationDisplayOptions[rotationIndex], false)
 
             updateCameraUi(it.url)
 
@@ -215,6 +224,9 @@ object OverlayEditDialog {
                 val selectedFilterDisplay = cameraFilterDropdown.text.toString()
                 val filterIndex = filterDisplayOptions.indexOf(selectedFilterDisplay).coerceAtLeast(0)
                 val cameraFilter = filterOptions[filterIndex]
+                val selectedRotationDisplay = cameraRotationDropdown.text.toString()
+                val rotationIndex = rotationDisplayOptions.indexOf(selectedRotationDisplay).coerceAtLeast(0)
+                val cameraRotation = rotationOptions[rotationIndex]
 
                 val xPx = posXInput.text.toString().toIntOrNull() ?: 0
                 val yPx = posYInput.text.toString().toIntOrNull() ?: 0
@@ -242,7 +254,8 @@ object OverlayEditDialog {
                     posYPercent = yPercent,
                     cameraShape = cameraShape,
                     cameraFilter = cameraFilter,
-                    cameraFlip = cameraFlip
+                    cameraFlip = cameraFlip,
+                    cameraRotation = cameraRotation
                 ) ?: OverlayConfig(
                     id = UUID.randomUUID().toString(),
                     name = name,
@@ -265,7 +278,8 @@ object OverlayEditDialog {
                     posYPercent = yPercent,
                     cameraShape = cameraShape,
                     cameraFilter = cameraFilter,
-                    cameraFlip = cameraFlip
+                    cameraFlip = cameraFlip,
+                    cameraRotation = cameraRotation
                 )
                 onSave(config)
                 dialog.dismiss()

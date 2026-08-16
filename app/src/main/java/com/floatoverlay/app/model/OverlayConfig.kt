@@ -26,7 +26,8 @@ data class OverlayConfig(
     val zIndex: Int = 0,
     val cameraShape: String = "square",
     val cameraFilter: String = "normal",
-    val cameraFlip: Boolean = true
+    val cameraFlip: Boolean = true,
+    val cameraRotation: String = "auto"
 ) {
     enum class Type {
         WEB,
@@ -74,6 +75,7 @@ data class OverlayConfig(
             put("cameraShape", cameraShape)
             put("cameraFilter", cameraFilter)
             put("cameraFlip", cameraFlip)
+            put("cameraRotation", cameraRotation)
         }
     }
 
@@ -107,7 +109,8 @@ data class OverlayConfig(
                 zIndex = json.optInt("zIndex", 0),
                 cameraShape = json.optString("cameraShape", "square"),
                 cameraFilter = json.optString("cameraFilter", "normal"),
-                cameraFlip = json.optBoolean("cameraFlip", true)
+                cameraFlip = json.optBoolean("cameraFlip", true),
+                cameraRotation = json.optString("cameraRotation", "auto")
             )
         }
     }
