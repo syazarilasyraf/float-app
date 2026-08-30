@@ -33,7 +33,8 @@ data class OverlayConfig(
         WEB,
         CAMERA,
         AI_CHAT,
-        MINECRAFT_PROJECT
+        MINECRAFT_PROJECT,
+        VIDEO
     }
 
     /** Compatibility: camera URLs are implicitly the CAMERA type. */
@@ -44,6 +45,7 @@ data class OverlayConfig(
             when {
                 url == "float://ai" -> Type.AI_CHAT
                 url.startsWith("float://minecraft/") -> Type.MINECRAFT_PROJECT
+                url.startsWith("float://video/") -> Type.VIDEO
                 else -> Type.WEB
             }
         }

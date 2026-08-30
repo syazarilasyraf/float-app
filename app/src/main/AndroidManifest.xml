@@ -37,6 +37,17 @@
             android:name=".ui.minecraft.ProjectDetailActivity"
             android:parentActivityName=".MainActivity" />
 
+        <activity
+            android:name=".ui.video.ShareReceiverActivity"
+            android:exported="true"
+            android:theme="@style/Theme.FloatOverlay.Translucent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".FloatOverlayService"
             android:enabled="true"

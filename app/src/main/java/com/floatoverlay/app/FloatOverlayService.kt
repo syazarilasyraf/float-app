@@ -56,6 +56,7 @@ import com.floatoverlay.app.ai.asText
 import com.floatoverlay.app.data.ConversationRepository
 import com.floatoverlay.app.data.ProjectRepository
 import com.floatoverlay.app.model.OverlayConfig
+import com.floatoverlay.app.model.SavedVideo
 import com.floatoverlay.app.ui.ai.ChatAdapter
 import kotlin.math.min
 
@@ -163,8 +164,34 @@ class FloatOverlayService : Service() {
                 LogStore.log(TAG, "Open floating Minecraft command received, project=$projectId")
                 if (projectId.isNotBlank()) openFloatingMinecraft(projectId)
             }
+            ACTION_DELETE_FLOATING_MINECRAFT -> {
+                val projectId = intent.getStringExtra(EXTRA_PROJECT_ID) ?: ""
+                LogStore.log(TAG, "Delete floating Minecraft command received, project=$projectId")
+                if (projectId.isNotBlank()) deleteFloatingMinecraft(projectId)
+            }
             ACTION_REFRESH_MINECRAFT_OVERLAYS -> {
                 refreshMinecraftOverlays()
+            }
+            ACTION_OPEN_FLOATING_VIDEO -> {
+                val sourceName = intent.getStringExtra(EXTRA_VIDEO_SOURCE) ?: ""
+                val videoId = intent.getStringExtra(EXTRA_VIDEO_ID) ?: ""
+                val title = intent.getStringExtra(EXTRA_VIDEO_TITLE) ?: ""
+                LogStore.log(TAG, "Open floating video command received, source=$sourceName id=$videoId")
+                if (sourceName.isNotBlank() && videoId.isNotBlank()) {
+                    val source = try {
+                        SavedVideo.Source.valueOf(sourceName)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (source != null) {
+                        openFloatingVideo(SavedVideo(source = source, videoId = videoId, originalUrl = "", title = title))
+                    }
+                }
+            }
+            ACTION_CLOSE_FLOATING_VIDEO -> {
+                val videoId = intent.getStringExtra(EXTRA_VIDEO_ID) ?: ""
+                LogStore.log(TAG, "Close floating video command received, id=$videoId")
+                if (videoId.isNotBlank()) closeFloatingVideo(videoId)
             }
             ACTION_APPLY_PROFILE -> {
                 val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
@@ -398,6 +425,50 @@ class FloatOverlayService : Service() {
         bringIconToFront()
     }
 
+    private fun openFloatingVideo(video: SavedVideo) {
+        val overlayId = "${VIDEO_OVERLAY_PREFIX}${video.source.name}_${video.videoId}"
+        if (overlayViews.containsKey(overlayId)) {
+            overlayViews[overlayId]?.visibility = View.VISIBLE
+            isExpanded = true
+            bringIconToFront()
+            return
+        }
+
+        val config = repository.getOverlay(overlayId) ?: OverlayConfig(
+            id = overlayId,
+            name = video.title.ifBlank { "${video.source.name} video" },
+            url = "float://video/${video.source.name}/${video.videoId}",
+            type = OverlayConfig.Type.VIDEO,
+            widthDp = 320,
+            heightDp = 260,
+            opacityPercent = 100,
+            touchThrough = false,
+            posXPercent = 0.05f,
+            posYPercent = 0.15f
+        )
+        repository.addOrUpdate(config)
+        val screenSize = getScreenSize()
+        addOverlay(config, screenSize)
+        isExpanded = true
+        bringIconToFront()
+    }
+
+    private fun closeFloatingVideo(videoId: String) {
+        val overlayId = overlayViews.keys.find { it.startsWith(VIDEO_OVERLAY_PREFIX) && it.contains("_${videoId}") }
+            ?: "${VIDEO_OVERLAY_PREFIX}${SavedVideo.Source.TIKTOK.name}_$videoId"
+        removeOverlayView(overlayId)
+        repository.delete(overlayId)
+        lastConfigs.remove(overlayId)
+    }
+
+    private fun deleteFloatingMinecraft(projectId: String) {
+        val overlayId = "$MINECRAFT_OVERLAY_PREFIX$projectId"
+        removeOverlayView(overlayId)
+        repository.delete(overlayId)
+        lastConfigs.remove(overlayId)
+        LogStore.log(TAG, "Deleted floating Minecraft overlay $overlayId")
+    }
+
     private fun refreshMinecraftOverlays() {
         minecraftProjectIds.entries.forEach { (id, projectId) ->
             overlayViews[id]?.let {
@@ -495,6 +566,7 @@ class FloatOverlayService : Service() {
 
     private fun removeOverlayView(id: String) {
         cancelVisualZoomRetries(id)
+        minecraftProjectIds.remove(id)
         cameraUseCases[id]?.let { useCase ->
             try {
                 cameraProvider?.unbind(useCase)
@@ -506,6 +578,14 @@ class FloatOverlayService : Service() {
         overlayViews[id]?.let {
             try {
                 windowManager?.removeView(it)
+                it.findViewWithTag<WebView>("overlayWebView")?.let { webView ->
+                    webView.stopLoading()
+                    webView.loadUrl("about:blank")
+                }
+                it.findViewWithTag<WebView>("overlayVideoWebView")?.let { webView ->
+                    webView.stopLoading()
+                    webView.loadUrl("about:blank")
+                }
             } catch (e: Exception) {
                 LogStore.logError(TAG, "removeOverlayView $id", e)
             }
@@ -573,6 +653,7 @@ class FloatOverlayService : Service() {
         } else when (config.resolvedType()) {
             OverlayConfig.Type.AI_CHAT -> addAiChatContent(container, config)
             OverlayConfig.Type.MINECRAFT_PROJECT -> addMinecraftContent(container, config)
+            OverlayConfig.Type.VIDEO -> addVideoContent(container, config)
             else -> addWebContent(container, config)
         }
 
@@ -1364,11 +1445,119 @@ class FloatOverlayService : Service() {
         refreshMinecraftView(view, projectId)
     }
 
+    private fun addVideoContent(container: FrameLayout, config: OverlayConfig) {
+        val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+        val view = inflater.inflate(R.layout.floating_video_player, container, false)
+        view.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        )
+
+        val webView = view.findViewById<WebView>(R.id.videoWebView)
+        webView.tag = "overlayVideoWebView"
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.settings.useWideViewPort = true
+        webView.settings.loadWithOverviewMode = true
+        webView.settings.mediaPlaybackRequiresUserGesture = false
+        webView.settings.userAgentString =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        webView.setBackgroundColor(0x00000000)
+
+        val parts = config.url.removePrefix("float://video/").split("/")
+        val source = try {
+            SavedVideo.Source.valueOf(parts.getOrElse(0) { "" })
+        } catch (e: Exception) {
+            SavedVideo.Source.TIKTOK
+        }
+        val videoId = parts.getOrElse(1) { "" }
+
+        val embedUrl = when (source) {
+            SavedVideo.Source.TIKTOK -> "https://www.tiktok.com/embed/v2/$videoId"
+            SavedVideo.Source.YOUTUBE -> "https://www.youtube.com/embed/$videoId?playsinline=1"
+        }
+        val fallbackUrl = when (source) {
+            SavedVideo.Source.TIKTOK -> "https://www.tiktok.com/video/$videoId"
+            SavedVideo.Source.YOUTUBE -> embedUrl
+        }
+
+        var hasLoaded = false
+        var hasFailed = false
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                hasLoaded = true
+                LogStore.log(TAG, "Video page finished for ${config.name}: $url")
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                errorCode: Int,
+                description: String?,
+                failingUrl: String?
+            ) {
+                super.onReceivedError(view, errorCode, description, failingUrl)
+                if (hasFailed) return
+                hasFailed = true
+                if (source == SavedVideo.Source.TIKTOK && failingUrl != embedUrl) {
+                    LogStore.log(TAG, "TikTok embed failed, trying canonical URL")
+                    view?.loadUrl(fallbackUrl)
+                }
+            }
+        }
+        webView.webChromeClient = WebChromeClient()
+
+        LogStore.log(TAG, "Loading video URL for ${config.name}: $embedUrl")
+        webView.loadUrl(embedUrl)
+
+        val playPauseButton = view.findViewById<Button>(R.id.videoPlayPauseButton)
+        val speedButton = view.findViewById<Button>(R.id.videoSpeedButton)
+        val closeButton = view.findViewById<Button>(R.id.videoCloseButton)
+
+        val speeds = listOf(0.5f, 1f, 1.5f, 2f)
+        var speedIndex = 1
+
+        fun updatePlayIcon() {
+            webView.evaluateJavascript(
+                "(function(){var v=document.querySelector('video');return v?(v.paused?'paused':'playing'):'novideo';})();"
+            ) { result ->
+                val state = result?.trim()?.removeSurrounding("\"") ?: "novideo"
+                playPauseButton.text = if (state == "playing") "⏸" else "▶"
+            }
+        }
+
+        playPauseButton.setOnClickListener {
+            webView.evaluateJavascript(
+                "(function(){var v=document.querySelector('video');if(v){if(v.paused){v.play();}else{v.pause();}}})();"
+            ) {}
+            webView.postDelayed({ updatePlayIcon() }, 150)
+        }
+
+        speedButton.setOnClickListener {
+            speedIndex = (speedIndex + 1) % speeds.size
+            val speed = speeds[speedIndex]
+            speedButton.text = "${speed}x"
+            webView.evaluateJavascript(
+                "(function(){var v=document.querySelector('video');if(v){v.playbackRate=$speed;}})();"
+            ) {}
+        }
+
+        closeButton.setOnClickListener {
+            closeFloatingVideo(videoId)
+        }
+
+        view.tag = "overlayVideoView"
+        container.addView(view)
+    }
+
     private fun refreshMinecraftView(view: View?, projectId: String) {
         val root = view ?: return
-        val project = ProjectRepository(this).getProject(projectId) ?: return
+        val project = ProjectRepository(this).getProject(projectId)
 
         val titleText = root.findViewById<TextView>(R.id.focusProjectName)
+        val emptyState = root.findViewById<TextView>(R.id.focusEmptyState)
+        val imageContainer = root.findViewById<View>(R.id.focusImageContainer)
         val imageView = root.findViewById<ImageView>(R.id.focusReferenceImage)
         val stepCounter = root.findViewById<TextView>(R.id.focusStepCounter)
         val stepTitle = root.findViewById<TextView>(R.id.focusStepTitle)
@@ -1377,7 +1566,28 @@ class FloatOverlayService : Service() {
         val nextButton = root.findViewById<Button>(R.id.focusNextButton)
         val zoomInButton = root.findViewById<Button>(R.id.focusZoomInButton)
         val zoomOutButton = root.findViewById<Button>(R.id.focusZoomOutButton)
+        val controlsRow = root.findViewById<View>(R.id.focusControlsRow)
         val materialProgress = root.findViewById<TextView>(R.id.focusMaterialProgress)
+
+        if (project == null) {
+            titleText.text = "No build project selected"
+            emptyState.visibility = View.VISIBLE
+            imageContainer.visibility = View.GONE
+            stepCounter.visibility = View.GONE
+            stepTitle.visibility = View.GONE
+            stepDescription.visibility = View.GONE
+            controlsRow.visibility = View.GONE
+            materialProgress.visibility = View.GONE
+            return
+        }
+
+        emptyState.visibility = View.GONE
+        imageContainer.visibility = View.VISIBLE
+        stepCounter.visibility = View.VISIBLE
+        stepTitle.visibility = View.VISIBLE
+        stepDescription.visibility = View.VISIBLE
+        controlsRow.visibility = View.VISIBLE
+        materialProgress.visibility = View.VISIBLE
 
         titleText.text = project.name
 
@@ -1570,6 +1780,9 @@ class FloatOverlayService : Service() {
         const val EXTRA_PROJECT_ID = "project_id"
         const val EXTRA_PROFILE_ID = "profile_id"
         const val EXTRA_PROFILE_MANUAL = "profile_manual"
+        const val EXTRA_VIDEO_SOURCE = "video_source"
+        const val EXTRA_VIDEO_ID = "video_id"
+        const val EXTRA_VIDEO_TITLE = "video_title"
 
         fun incrementBadge(context: Context, category: NotificationCounter.Category, amount: Int = 1) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
@@ -1639,6 +1852,24 @@ class FloatOverlayService : Service() {
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
 
+        fun openFloatingVideo(context: Context, video: SavedVideo) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_OPEN_FLOATING_VIDEO
+                putExtra(EXTRA_VIDEO_SOURCE, video.source.name)
+                putExtra(EXTRA_VIDEO_ID, video.videoId)
+                putExtra(EXTRA_VIDEO_TITLE, video.title.ifBlank { video.originalUrl })
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun closeFloatingVideo(context: Context, videoId: String) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_CLOSE_FLOATING_VIDEO
+                putExtra(EXTRA_VIDEO_ID, videoId)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
         fun applyProfile(context: Context, profileId: String, manual: Boolean = true) {
             val intent = Intent(context, FloatOverlayService::class.java).apply {
                 action = ACTION_APPLY_PROFILE
@@ -1651,10 +1882,22 @@ class FloatOverlayService : Service() {
         private const val ACTION_OPEN_FLOATING_AI = "com.floatoverlay.app.OPEN_FLOATING_AI"
         private const val ACTION_TOGGLE_FLOATING_AI = "com.floatoverlay.app.TOGGLE_FLOATING_AI"
         private const val ACTION_OPEN_FLOATING_MINECRAFT = "com.floatoverlay.app.OPEN_FLOATING_MINECRAFT"
+        private const val ACTION_DELETE_FLOATING_MINECRAFT = "com.floatoverlay.app.DELETE_FLOATING_MINECRAFT"
         private const val ACTION_REFRESH_MINECRAFT_OVERLAYS = "com.floatoverlay.app.REFRESH_MINECRAFT_OVERLAYS"
+        private const val ACTION_OPEN_FLOATING_VIDEO = "com.floatoverlay.app.OPEN_FLOATING_VIDEO"
+        private const val ACTION_CLOSE_FLOATING_VIDEO = "com.floatoverlay.app.CLOSE_FLOATING_VIDEO"
 
         private const val AI_OVERLAY_ID = "float_ai"
         private const val MINECRAFT_OVERLAY_PREFIX = "float_minecraft_"
+        private const val VIDEO_OVERLAY_PREFIX = "float_video_"
+
+        fun deleteFloatingMinecraftProject(context: Context, projectId: String) {
+            val intent = Intent(context, FloatOverlayService::class.java).apply {
+                action = ACTION_DELETE_FLOATING_MINECRAFT
+                putExtra(EXTRA_PROJECT_ID, projectId)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
 
         private const val SAMPLE_OVERLAY_HTML = """
             <!DOCTYPE html>

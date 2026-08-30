@@ -69,4 +69,7 @@ dependencies {
     // Networking and secure storage for AI providers.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // JSON serialization for shared-video persistence.
+    implementation("com.google.code.gson:gson:2.11.0")
 }

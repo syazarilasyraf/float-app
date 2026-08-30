@@ -1,3 +1,7 @@
+/* AI feature shelved - re-enable by restoring the AI tab in MainPagerAdapter.
+ * NOTE: api.kimi.com/coding/v1 endpoint rejects non-coding-agent clients;
+ * switch to api.moonshot.ai/v1 with a platform API key when re-enabling.
+ */
 package com.floatoverlay.app.ai
 
 import android.content.Context
