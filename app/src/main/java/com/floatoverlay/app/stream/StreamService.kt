@@ -40,6 +40,8 @@ import org.webrtc.RtpTransceiver
 import org.webrtc.ScreenCapturerAndroid
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoFrame
+import org.webrtc.VideoSink
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.io.IOException
@@ -165,6 +167,19 @@ class StreamService : Service() {
             }
 
             videoTrack = peerConnectionFactory?.createVideoTrack(VIDEO_TRACK_ID, source)
+            videoTrack?.addSink(object : VideoSink {
+                private var frameCount = 0
+                private var lastLog = System.currentTimeMillis()
+                override fun onFrame(frame: VideoFrame) {
+                    frameCount++
+                    val now = System.currentTimeMillis()
+                    if (now - lastLog >= 5000) {
+                        LogStore.log(TAG, "Local frames produced: $frameCount (${frame.buffer.width}x${frame.buffer.height})")
+                        frameCount = 0
+                        lastLog = now
+                    }
+                }
+            })
 
             streamRepository.setStreaming(true)
             LogStore.log(TAG, "Screen capture started ${width}x${height} @ ${TARGET_FPS}fps")
