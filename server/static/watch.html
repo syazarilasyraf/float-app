@@ -179,13 +179,18 @@
 
       pc.ontrack = (event) => {
         console.log('ontrack', event.track?.kind, event.streams);
-        if (event.streams && event.streams[0]) {
-          video.srcObject = event.streams[0];
-        } else if (event.track) {
-          video.srcObject = new MediaStream([event.track]);
-        }
-        setStatus('live', 'LIVE');
-        latencyEl.style.display = 'block';
+        const stream = (event.streams && event.streams[0]) ? event.streams[0] : (event.track ? new MediaStream([event.track]) : null);
+        if (!stream) return;
+
+        video.srcObject = stream;
+        video.play().catch((e) => console.error('video.play() failed', e));
+
+        event.track.onmute = () => console.log('track muted');
+        event.track.onunmute = () => {
+          console.log('track unmuted');
+          setStatus('live', 'LIVE');
+          latencyEl.style.display = 'block';
+        };
       };
 
       pc.onconnectionstatechange = () => {
@@ -193,10 +198,25 @@
         if (pc.connectionState === 'connected') {
           setStatus('connected', 'Connected');
           setTimeout(() => setStatus('live', 'LIVE'), 1000);
+          startStats(pc);
         } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
           setStatus('offline', 'Connection lost');
         }
       };
+    }
+
+    function startStats(pc) {
+      setInterval(async () => {
+        const stats = await pc.getStats();
+        stats.forEach((report) => {
+          if (report.type === 'inbound-rtp' && report.kind === 'video') {
+            console.log('stats inbound video', report);
+          }
+          if (report.type === 'track' && report.kind === 'video') {
+            console.log('stats track', report);
+          }
+        });
+      }, 3000);
     }
 
     connect();

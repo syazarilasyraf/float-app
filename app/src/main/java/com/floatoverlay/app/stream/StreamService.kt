@@ -65,6 +65,13 @@ class StreamService : Service() {
     private var peerConnection: PeerConnection? = null
     private var signalingClient: SignalingClient? = null
     private var isStopping = false
+    private val statsHandler = Handler(Looper.getMainLooper())
+    private val statsRunnable = object : Runnable {
+        override fun run() {
+            logConnectionStats()
+            statsHandler.postDelayed(this, 5000)
+        }
+    }
 
     private lateinit var streamRepository: StreamRepository
     private val httpClient = OkHttpClient.Builder()
@@ -251,6 +258,8 @@ class StreamService : Service() {
                 signalingListener
             ).apply { connect() }
 
+            statsHandler.postDelayed(statsRunnable, 5000)
+
             LogStore.log(TAG, "Peer connection created, viewer link: $viewerUrl")
         } catch (e: Exception) {
             LogStore.logError(TAG, "Failed to create peer connection", e)
@@ -383,6 +392,29 @@ class StreamService : Service() {
         }
     }
 
+    private fun logConnectionStats() {
+        val pc = peerConnection ?: return
+        try {
+            pc.getStats { report ->
+                var bytesSent = 0L
+                var packetsSent = 0L
+                var outboundFound = false
+                for (stats in report.statsMap.values) {
+                    if (stats.type == "outbound-rtp" && stats.members["kind"] == "video") {
+                        outboundFound = true
+                        bytesSent += (stats.members["bytesSent"] as? Number)?.toLong() ?: 0L
+                        packetsSent += (stats.members["packetsSent"] as? Number)?.toLong() ?: 0L
+                    }
+                }
+                if (outboundFound) {
+                    LogStore.log(TAG, "Outbound video bytesSent=$bytesSent packetsSent=$packetsSent")
+                }
+            }
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Failed to get stats", e)
+        }
+    }
+
     private fun computeLandscapeSize(screenWidth: Int, screenHeight: Int, targetWidth: Int, targetHeight: Int): Pair<Int, Int> {
         val isLandscape = screenWidth >= screenHeight
         val (longer, shorter) = if (isLandscape) {
@@ -447,6 +479,7 @@ class StreamService : Service() {
             isStopping = true
         }
         LogStore.log(TAG, "Stopping stream")
+        statsHandler.removeCallbacks(statsRunnable)
         try {
             httpClient.dispatcher.cancelAll()
 
