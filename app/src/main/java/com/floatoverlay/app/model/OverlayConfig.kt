@@ -32,8 +32,6 @@ data class OverlayConfig(
     enum class Type {
         WEB,
         CAMERA,
-        AI_CHAT,
-        MINECRAFT_PROJECT,
         VIDEO
     }
 
@@ -43,8 +41,6 @@ data class OverlayConfig(
         url.startsWith("camera://") -> Type.CAMERA
         url.startsWith("float://") -> {
             when {
-                url == "float://ai" -> Type.AI_CHAT
-                url.startsWith("float://minecraft/") -> Type.MINECRAFT_PROJECT
                 url.startsWith("float://video/") -> Type.VIDEO
                 else -> Type.WEB
             }

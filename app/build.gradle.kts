@@ -66,9 +66,8 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.4")
     implementation("androidx.camera:camera-view:1.3.4")
 
-    // Networking and secure storage for AI providers.
+    // Networking for WebRTC signaling and shared-video URL resolution.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // JSON serialization for shared-video persistence.
     implementation("com.google.code.gson:gson:2.11.0")

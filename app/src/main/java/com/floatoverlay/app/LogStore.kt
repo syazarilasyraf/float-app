@@ -6,15 +6,21 @@ import java.util.Locale
 
 object LogStore {
 
+    private const val MAX_LOGS = 100
+
+    // Drop spammy WebRTC network-change messages that can flood the in-app log.
+    private val spammyTags = setOf("NetworkMonitorAutoDetect", "NetworkMonitor")
+
     private val logs = ArrayDeque<String>()
     private var listeners = mutableListOf<() -> Unit>()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     @Synchronized
     fun log(tag: String, message: String) {
+        if (spammyTags.any { tag.contains(it, ignoreCase = true) }) return
         val line = "[${timeFormat.format(Date())}] $tag: $message"
         logs.addLast(line)
-        while (logs.size > 200) logs.removeFirst()
+        while (logs.size > MAX_LOGS) logs.removeFirst()
         listeners.forEach { it.invoke() }
     }
 

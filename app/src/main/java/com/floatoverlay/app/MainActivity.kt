@@ -115,7 +115,7 @@ class MainActivity : AppCompatActivity(), StreamFragment.StreamLauncher {
         TabLayoutMediator(tabLayout, viewPager) { tab, position ->
             tab.text = when (position) {
                 0 -> "Overlays"
-                1 -> "Minecraft"
+                1 -> "Saved"
                 2 -> "Logs"
                 3 -> "Game"
                 4 -> "Stream"
