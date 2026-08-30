@@ -61,6 +61,7 @@ class StreamService : Service() {
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var signalingClient: SignalingClient? = null
+    private var isStopping = false
 
     private lateinit var streamRepository: StreamRepository
     private val httpClient = OkHttpClient.Builder()
@@ -111,7 +112,8 @@ class StreamService : Service() {
             eglBase = EglBase.createEgl14(EglBase.CONFIG_PLAIN)
             val eglContext = eglBase?.eglBaseContext
 
-            val encoderFactory = DefaultVideoEncoderFactory(eglContext, true, true)
+            // enableIntelVp8Encoder=true, enableH264HighProfile=false for maximum device compatibility.
+            val encoderFactory = DefaultVideoEncoderFactory(eglContext, true, false)
             val decoderFactory = org.webrtc.DefaultVideoDecoderFactory(eglContext)
 
             peerConnectionFactory = PeerConnectionFactory.builder()
@@ -404,8 +406,14 @@ class StreamService : Service() {
     }
 
     private fun stopStreaming() {
+        synchronized(this) {
+            if (isStopping) return
+            isStopping = true
+        }
         LogStore.log(TAG, "Stopping stream")
         try {
+            httpClient.dispatcher.cancelAll()
+
             signalingClient?.disconnect()
             signalingClient = null
 
@@ -431,14 +439,16 @@ class StreamService : Service() {
 
             peerConnectionFactory?.dispose()
             peerConnectionFactory = null
-
-            httpClient.dispatcher.cancelAll()
         } catch (e: Exception) {
             LogStore.logError(TAG, "Error during stream teardown", e)
         }
 
         streamRepository.setStreaming(false)
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "stopForeground failed", e)
+        }
         stopSelf()
     }
 
