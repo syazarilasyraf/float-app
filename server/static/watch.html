@@ -151,12 +151,16 @@
 
       ws.onmessage = async (event) => {
         const msg = JSON.parse(event.data);
+        console.log('ws message', msg.type);
         if (msg.type === 'offer') {
+          console.log('received offer');
           await pc.setRemoteDescription(new RTCSessionDescription(msg));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
+          console.log('sending answer');
           ws.send(JSON.stringify(answer));
         } else if (msg.type === 'candidate') {
+          console.log('adding ice candidate');
           await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
         } else if (msg.type === 'viewer-disconnected') {
           setStatus('offline', 'Stream ended');
@@ -174,11 +178,14 @@
       };
 
       pc.ontrack = (event) => {
+        console.log('ontrack', event.track?.kind, event.streams);
         if (event.streams && event.streams[0]) {
           video.srcObject = event.streams[0];
-          setStatus('live', 'LIVE');
-          latencyEl.style.display = 'block';
+        } else if (event.track) {
+          video.srcObject = new MediaStream([event.track]);
         }
+        setStatus('live', 'LIVE');
+        latencyEl.style.display = 'block';
       };
 
       pc.onconnectionstatechange = () => {

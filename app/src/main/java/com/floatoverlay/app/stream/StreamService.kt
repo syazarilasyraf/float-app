@@ -36,6 +36,7 @@ import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpTransceiver
 import org.webrtc.ScreenCapturerAndroid
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
@@ -219,7 +220,13 @@ class StreamService : Service() {
             }
 
             peerConnection = peerConnectionFactory?.createPeerConnection(rtcConfig, peerConnectionObserver)?.apply {
-                videoTrack?.let { addTrack(it) }
+                videoTrack?.let { track ->
+                    val transceiver = addTransceiver(
+                        track,
+                        RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                    )
+                    LogStore.log(TAG, "Video transceiver added: direction=${transceiver?.direction}, mid=${transceiver?.mid}")
+                }
             }
 
             signalingClient = SignalingClient(
