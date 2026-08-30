@@ -1,8 +1,10 @@
 package com.floatoverlay.app
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -13,11 +15,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.viewpager2.widget.ViewPager2
+import com.floatoverlay.app.ui.stream.StreamFragment
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), StreamFragment.StreamLauncher {
 
     private lateinit var permissionStatus: TextView
     private lateinit var grantPermissionButton: Button
@@ -45,6 +48,17 @@ class MainActivity : AppCompatActivity() {
         } else {
             Toast.makeText(this, "Camera permission denied; camera overlays will be skipped", Toast.LENGTH_LONG).show()
             startOverlayServiceInternal(skipCamera = true)
+        }
+    }
+
+    private val mediaProjectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            // TODO Phase 2: forward result.data to StreamService.
+            Toast.makeText(this, "Screen capture permission granted", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -91,6 +105,7 @@ class MainActivity : AppCompatActivity() {
                 1 -> "Minecraft"
                 2 -> "Logs"
                 3 -> "Game"
+                4 -> "Stream"
                 else -> ""
             }
         }.attach()
@@ -146,5 +161,10 @@ class MainActivity : AppCompatActivity() {
     private fun stopOverlayService() {
         LogStore.log("MainActivity", "Stopping overlay service")
         stopService(Intent(this, FloatOverlayService::class.java))
+    }
+
+    override fun requestStartStream() {
+        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
 }

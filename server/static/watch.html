@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZOMSTREAM Viewer</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: #000;
+      color: #fff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      height: 100%;
+      overflow: hidden;
+    }
+    #container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: #111;
+      border-bottom: 1px solid #333;
+    }
+    #status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    #status-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #666;
+    }
+    #status-dot.live { background: #ff3b30; box-shadow: 0 0 6px #ff3b30; }
+    #status-dot.connecting { background: #ffcc00; }
+    #status-dot.connected { background: #34c759; }
+    #video-wrap {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    #controls {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      display: flex;
+      gap: 8px;
+    }
+    button {
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:active { background: rgba(255,255,255,0.15); }
+    #latency {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      background: rgba(0,0,0,0.6);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #ccc;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="header">
+      <div id="status"><span id="status-dot"></span><span id="status-text">Offline</span></div>
+      <div style="font-size:12px;color:#888;">ZOMSTREAM</div>
+    </div>
+    <div id="video-wrap">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div id="latency">Latency: -- ms</div>
+      <div id="controls">
+        <button id="fullscreenBtn">Fullscreen</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const video = document.getElementById('remoteVideo');
+    const latencyEl = document.getElementById('latency');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+    function setStatus(state, text) {
+      statusDot.className = '';
+      statusDot.classList.add(state);
+      statusText.textContent = text;
+    }
+
+    fullscreenBtn.addEventListener('click', () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        document.documentElement.requestFullscreen();
+      }
+    });
+
+    async function connect() {
+      setStatus('connecting', 'Connecting...');
+
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      const streamId = pathParts[pathParts.length - 1] || '';
+      const token = new URLSearchParams(window.location.search).get('token') || '';
+
+      if (!streamId || !token) {
+        setStatus('offline', 'Invalid link');
+        return;
+      }
+
+      let iceConfig;
+      try {
+        const res = await fetch('/ice-config');
+        iceConfig = await res.json();
+      } catch (e) {
+        console.error('Failed to fetch ICE config', e);
+        iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+      }
+
+      const pc = new RTCPeerConnection(iceConfig);
+      const ws = new WebSocket(`${window.location.protocol.replace('http', 'ws')}//${window.location.host}/ws/viewer/${streamId}?token=${token}`);
+
+      ws.onopen = () => {
+        console.log('viewer websocket open');
+      };
+
+      ws.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'offer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify(answer));
+        } else if (msg.type === 'candidate') {
+          await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+        } else if (msg.type === 'viewer-disconnected') {
+          setStatus('offline', 'Stream ended');
+        }
+      };
+
+      ws.onclose = () => {
+        setStatus('offline', 'Disconnected');
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+        }
+      };
+
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          video.srcObject = event.streams[0];
+          setStatus('live', 'LIVE');
+          latencyEl.style.display = 'block';
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log('PC state', pc.connectionState);
+        if (pc.connectionState === 'connected') {
+          setStatus('connected', 'Connected');
+          setTimeout(() => setStatus('live', 'LIVE'), 1000);
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          setStatus('offline', 'Connection lost');
+        }
+      };
+    }
+
+    connect();
+  </script>
+</body>
+</html>

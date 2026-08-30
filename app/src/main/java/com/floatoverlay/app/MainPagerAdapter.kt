@@ -7,10 +7,11 @@ import com.floatoverlay.app.ui.game.GameLauncherFragment
 import com.floatoverlay.app.ui.logs.LogsFragment
 import com.floatoverlay.app.ui.minecraft.MinecraftProjectsFragment
 import com.floatoverlay.app.ui.overlay.OverlayListFragment
+import com.floatoverlay.app.ui.stream.StreamFragment
 
 class MainPagerAdapter(activity: FragmentActivity) : FragmentStateAdapter(activity) {
 
-    override fun getItemCount(): Int = 4
+    override fun getItemCount(): Int = 5
 
     override fun createFragment(position: Int): Fragment {
         return when (position) {
@@ -18,6 +19,7 @@ class MainPagerAdapter(activity: FragmentActivity) : FragmentStateAdapter(activi
             1 -> MinecraftProjectsFragment()
             2 -> LogsFragment()
             3 -> GameLauncherFragment()
+            4 -> StreamFragment()
             else -> OverlayListFragment()
         }
     }

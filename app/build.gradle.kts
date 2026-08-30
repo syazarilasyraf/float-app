@@ -72,4 +72,7 @@ dependencies {
 
     // JSON serialization for shared-video persistence.
     implementation("com.google.code.gson:gson:2.11.0")
+
+    // WebRTC for private screen streaming (webrtc-sdk fork on JitPack).
+    implementation("com.github.webrtc-sdk:android:104.5112.10")
 }

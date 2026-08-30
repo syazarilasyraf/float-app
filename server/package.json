@@ -1,0 +1,16 @@
+{
+  "name": "float-stream-signaling",
+  "version": "1.0.0",
+  "description": "Minimal WebRTC signaling server for Float private screen streaming.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --env-file=.env index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
