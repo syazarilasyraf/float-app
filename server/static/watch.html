@@ -92,7 +92,7 @@
       <div style="font-size:12px;color:#888;">ZOMSTREAM</div>
     </div>
     <div id="video-wrap">
-      <video id="remoteVideo" autoplay playsinline></video>
+      <video id="remoteVideo" autoplay playsinline muted></video>
       <div id="latency">Latency: -- ms</div>
       <div id="controls">
         <button id="fullscreenBtn">Fullscreen</button>
@@ -182,8 +182,12 @@
         const stream = (event.streams && event.streams[0]) ? event.streams[0] : (event.track ? new MediaStream([event.track]) : null);
         if (!stream) return;
 
+        video.muted = true;
         video.srcObject = stream;
-        video.play().catch((e) => console.error('video.play() failed', e));
+        video.play().catch((e) => {
+          console.error('video.play() failed', e);
+          setStatus('offline', 'Tap video to play');
+        });
 
         event.track.onmute = () => console.log('track muted');
         event.track.onunmute = () => {
@@ -192,6 +196,11 @@
           latencyEl.style.display = 'block';
         };
       };
+
+      video.addEventListener('click', () => {
+        video.muted = true;
+        video.play().catch((e) => console.error('click play failed', e));
+      });
 
       pc.onconnectionstatechange = () => {
         console.log('PC state', pc.connectionState);
