@@ -513,7 +513,9 @@ class StreamService : Service() {
             val intent = Intent(context, StreamService::class.java).apply {
                 action = ACTION_STOP
             }
-            ContextCompat.startForegroundService(context, intent)
+            // Use startService, not startForegroundService, because we are stopping.
+            // startForegroundService would require another startForeground() call.
+            context.startService(intent)
         }
     }
 }
