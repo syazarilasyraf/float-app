@@ -58,7 +58,11 @@ class SignalingClient(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 LogStore.log(TAG, "Signaling socket closed: $code $reason")
-                listener.onDisconnected()
+                if (code != 1000) {
+                    listener.onError("Signaling connection closed")
+                } else {
+                    listener.onDisconnected()
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
@@ -60,6 +61,17 @@ class MainActivity : AppCompatActivity(), StreamFragment.StreamLauncher {
             StreamService.start(this, result.resultCode, data)
         } else {
             Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            launchMediaProjection()
+        } else {
+            Toast.makeText(this, "Notification permission denied; stream controls may be limited", Toast.LENGTH_LONG).show()
+            launchMediaProjection()
         }
     }
 
@@ -165,6 +177,17 @@ class MainActivity : AppCompatActivity(), StreamFragment.StreamLauncher {
     }
 
     override fun requestStartStream() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            when (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)) {
+                PackageManager.PERMISSION_GRANTED -> launchMediaProjection()
+                else -> notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        } else {
+            launchMediaProjection()
+        }
+    }
+
+    private fun launchMediaProjection() {
         val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }

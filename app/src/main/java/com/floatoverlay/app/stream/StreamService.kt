@@ -83,7 +83,9 @@ class StreamService : Service() {
                 @Suppress("DEPRECATION")
                 val data = intent.getParcelableExtra<Intent>(EXTRA_DATA)
                 if (data != null && resultCode == Activity.RESULT_OK) {
-                    startStreaming(resultCode, data)
+                    // Start foreground immediately to satisfy Android 12+ deadlines.
+                    startForegroundWithNotification()
+                    startStreaming(data)
                 } else {
                     LogStore.log(TAG, "Start stream requested without MediaProjection permission")
                     stopSelf()
@@ -124,7 +126,7 @@ class StreamService : Service() {
         }
     }
 
-    private fun startStreaming(resultCode: Int, data: Intent) {
+    private fun startStreaming(data: Intent) {
         if (capturer != null) {
             LogStore.log(TAG, "Stream already active")
             return
@@ -132,11 +134,9 @@ class StreamService : Service() {
 
         if (peerConnectionFactory == null || surfaceTextureHelper == null) {
             LogStore.log(TAG, "WebRTC not initialized, cannot start stream")
-            stopSelf()
+            stopStreaming()
             return
         }
-
-        startForegroundWithNotification()
 
         val metrics = DisplayMetrics()
         val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager

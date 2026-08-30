@@ -3,6 +3,7 @@ package com.floatoverlay.app.ui.stream
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -27,7 +28,7 @@ import com.floatoverlay.app.stream.StreamService
  *
  * The actual capture and WebRTC work lives in [com.floatoverlay.app.stream.StreamService].
  */
-class StreamFragment : Fragment() {
+class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeListener {
 
     private lateinit var repository: StreamRepository
 
@@ -42,6 +43,22 @@ class StreamFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = StreamRepository(requireContext())
+    }
+
+    override fun onStart() {
+        super.onStart()
+        repository.registerListener(this)
+    }
+
+    override fun onStop() {
+        repository.unregisterListener(this)
+        super.onStop()
+    }
+
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
+        if (key == StreamRepository.KEY_IS_STREAMING || key == StreamRepository.KEY_VIEWER_URL) {
+            activity?.runOnUiThread { updateUi() }
+        }
     }
 
     override fun onCreateView(

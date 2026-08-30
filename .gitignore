@@ -19,3 +19,5 @@ app/build
 .jdk/
 android-sdk/
 .android-sdk/
+server/node_modules/
+server/.env

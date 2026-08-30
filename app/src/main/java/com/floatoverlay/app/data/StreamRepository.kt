@@ -58,13 +58,21 @@ class StreamRepository(context: Context) {
             .apply()
     }
 
+    fun registerListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun unregisterListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
     companion object {
         private const val PREFS_NAME = "FloatStreamPrefs"
-        private const val KEY_SERVER_URL = "stream_server_url"
-        private const val KEY_IS_STREAMING = "is_streaming"
-        private const val KEY_STREAM_ID = "stream_id"
-        private const val KEY_STREAM_TOKEN = "stream_token"
-        private const val KEY_VIEWER_URL = "viewer_url"
+        const val KEY_SERVER_URL = "stream_server_url"
+        const val KEY_IS_STREAMING = "is_streaming"
+        const val KEY_STREAM_ID = "stream_id"
+        const val KEY_STREAM_TOKEN = "stream_token"
+        const val KEY_VIEWER_URL = "viewer_url"
 
         private const val DEFAULT_SERVER_URL = "http://192.168.1.100:3000"
     }
