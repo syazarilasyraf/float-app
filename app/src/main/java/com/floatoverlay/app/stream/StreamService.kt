@@ -251,14 +251,16 @@ class StreamService : Service() {
 
         override fun onViewerJoined() {
             LogStore.log(TAG, "Viewer joined, pc=${peerConnection != null}, track=${videoTrack != null}, signaling=${signalingClient != null}")
-            if (peerConnection == null || videoTrack == null) {
-                LogStore.log(TAG, "Cannot create offer: peerConnection or videoTrack is null")
-                return
-            }
-            try {
-                createOffer()
-            } catch (e: Exception) {
-                LogStore.logError(TAG, "Failed to create offer", e)
+            runOnMainThread {
+                if (peerConnection == null || videoTrack == null) {
+                    LogStore.log(TAG, "Cannot create offer: peerConnection or videoTrack is null")
+                    return@runOnMainThread
+                }
+                try {
+                    createOffer()
+                } catch (e: Exception) {
+                    LogStore.logError(TAG, "Failed to create offer", e)
+                }
             }
         }
 
