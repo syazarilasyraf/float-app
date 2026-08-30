@@ -250,8 +250,16 @@ class StreamService : Service() {
         }
 
         override fun onViewerJoined() {
-            LogStore.log(TAG, "Viewer joined, creating offer")
-            createOffer()
+            LogStore.log(TAG, "Viewer joined, pc=${peerConnection != null}, track=${videoTrack != null}, signaling=${signalingClient != null}")
+            if (peerConnection == null || videoTrack == null) {
+                LogStore.log(TAG, "Cannot create offer: peerConnection or videoTrack is null")
+                return
+            }
+            try {
+                createOffer()
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Failed to create offer", e)
+            }
         }
 
         override fun onOfferAnswerReceived(sdpType: String, sdp: String) {
@@ -320,8 +328,12 @@ class StreamService : Service() {
         peerConnection?.createOffer(object : org.webrtc.SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription) {
                 LogStore.log(TAG, "Offer created")
-                peerConnection?.setLocalDescription(sdpObserver("set-local-offer"), sdp)
-                signalingClient?.sendOffer(sdp.type.canonicalForm(), sdp.description)
+                try {
+                    peerConnection?.setLocalDescription(sdpObserver("set-local-offer"), sdp)
+                    signalingClient?.sendOffer(sdp.type.canonicalForm(), sdp.description)
+                } catch (e: Exception) {
+                    LogStore.logError(TAG, "Failed to send offer", e)
+                }
             }
 
             override fun onSetSuccess() {}
