@@ -8,4 +8,9 @@
     <string name="overlay_running">Float is running</string>
     <string name="overlay_running_desc">Tap to open the app</string>
     <string name="overlay_channel_name">Float Service</string>
+
+    <string name="stream_running">Float stream is live</string>
+    <string name="stream_running_desc">Screen is being streamed privately. Tap to stop.</string>
+    <string name="stream_channel_name">Float Stream</string>
+    <string name="stream_action_stop">Stop Stream</string>
 </resources>

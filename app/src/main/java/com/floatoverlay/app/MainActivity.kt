@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.viewpager2.widget.ViewPager2
 import com.floatoverlay.app.ui.stream.StreamFragment
+import com.floatoverlay.app.stream.StreamService
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
@@ -54,9 +55,9 @@ class MainActivity : AppCompatActivity(), StreamFragment.StreamLauncher {
     private val mediaProjectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            // TODO Phase 2: forward result.data to StreamService.
-            Toast.makeText(this, "Screen capture permission granted", Toast.LENGTH_SHORT).show()
+        val data = result.data
+        if (result.resultCode == RESULT_OK && data != null) {
+            StreamService.start(this, result.resultCode, data)
         } else {
             Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
         }

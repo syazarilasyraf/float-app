@@ -1,13 +1,20 @@
 package com.floatoverlay.app.ui.stream
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import com.floatoverlay.app.R
+import com.floatoverlay.app.data.StreamRepository
+import com.floatoverlay.app.stream.StreamService
 
 /**
  * UI for the private screen-streaming feature.
@@ -22,12 +29,20 @@ import com.floatoverlay.app.R
  */
 class StreamFragment : Fragment() {
 
+    private lateinit var repository: StreamRepository
+
     private lateinit var statusText: TextView
     private lateinit var statsText: TextView
     private lateinit var linkText: TextView
+    private lateinit var serverUrlInput: EditText
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
     private lateinit var copyLinkButton: Button
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        repository = StreamRepository(requireContext())
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -43,35 +58,54 @@ class StreamFragment : Fragment() {
         statusText = view.findViewById(R.id.streamStatusText)
         statsText = view.findViewById(R.id.streamStatsText)
         linkText = view.findViewById(R.id.streamLinkText)
+        serverUrlInput = view.findViewById(R.id.serverUrlInput)
         startButton = view.findViewById(R.id.startStreamButton)
         stopButton = view.findViewById(R.id.stopStreamButton)
         copyLinkButton = view.findViewById(R.id.copyLinkButton)
 
-        updateUi(false, null)
+        serverUrlInput.setText(repository.getServerUrl())
+        serverUrlInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                repository.setServerUrl(serverUrlInput.text.toString().trim())
+            }
+        }
 
         startButton.setOnClickListener {
-            // MediaProjection capture will be triggered from MainActivity so the
-            // result Intent can be forwarded to StreamService.
+            repository.setServerUrl(serverUrlInput.text.toString().trim())
             (activity as? StreamLauncher)?.requestStartStream()
         }
 
         stopButton.setOnClickListener {
-            // TODO: stop StreamService
+            StreamService.stop(requireContext())
         }
 
         copyLinkButton.setOnClickListener {
-            // TODO: copy viewer link to clipboard
+            val link = repository.getViewerUrl()
+            if (link.isNotBlank()) {
+                val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Float stream link", link))
+                Toast.makeText(requireContext(), "Link copied", Toast.LENGTH_SHORT).show()
+            }
         }
+
+        updateUi()
     }
 
-    private fun updateUi(isLive: Boolean, link: String?) {
+    override fun onResume() {
+        super.onResume()
+        updateUi()
+    }
+
+    private fun updateUi() {
+        val isLive = repository.isStreaming()
+        val link = repository.getViewerUrl()
         if (isLive) {
             statusText.text = "Streaming \uD83D\uDD34 LIVE"
             statsText.text = "Quality: 720p / 30 FPS\nBitrate: 2.5 Mbps\nViewers: 1"
-            linkText.text = link ?: ""
+            linkText.text = link
             startButton.isEnabled = false
             stopButton.isEnabled = true
-            copyLinkButton.isEnabled = !link.isNullOrBlank()
+            copyLinkButton.isEnabled = link.isNotBlank()
         } else {
             statusText.text = "Status: OFFLINE"
             statsText.text = "Quality: 720p / 30 FPS\nBitrate: 2.5 Mbps"
