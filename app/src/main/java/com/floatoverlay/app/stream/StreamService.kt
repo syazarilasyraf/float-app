@@ -1,5 +1,6 @@
 package com.floatoverlay.app.stream
 
+import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,32 +8,48 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.app.Activity
 import android.hardware.display.DisplayManager
 import android.media.projection.MediaProjection
 import android.os.Build
-import android.view.Display
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.DisplayMetrics
+import android.view.Display
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.floatoverlay.app.LogStore
 import com.floatoverlay.app.MainActivity
 import com.floatoverlay.app.R
 import com.floatoverlay.app.data.StreamRepository
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import org.json.JSONObject
+import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
+import org.webrtc.IceCandidate
+import org.webrtc.MediaConstraints
+import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.ScreenCapturerAndroid
+import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * Foreground service that captures the device screen via MediaProjection and
- * feeds it into a WebRTC video track.
+ * streams it privately to a browser viewer over WebRTC.
  *
- * The service keeps the capture/encoding pipeline alive while the user is in
- * another app (e.g. Project Zomboid via ZomDroid).
+ * The service keeps the capture/encoding/WebRTC pipeline alive while the user
+ * is in another app (e.g. Project Zomboid via ZomDroid).
  */
 class StreamService : Service() {
 
@@ -42,8 +59,13 @@ class StreamService : Service() {
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var eglBase: EglBase? = null
     private var peerConnectionFactory: PeerConnectionFactory? = null
+    private var peerConnection: PeerConnection? = null
+    private var signalingClient: SignalingClient? = null
 
     private lateinit var streamRepository: StreamRepository
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .build()
 
     override fun onCreate() {
         super.onCreate()
@@ -58,6 +80,7 @@ class StreamService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
+                @Suppress("DEPRECATION")
                 val data = intent.getParcelableExtra<Intent>(EXTRA_DATA)
                 if (data != null && resultCode == Activity.RESULT_OK) {
                     startStreaming(resultCode, data)
@@ -86,13 +109,12 @@ class StreamService : Service() {
             eglBase = EglBase.createEgl14(EglBase.CONFIG_PLAIN)
             val eglContext = eglBase?.eglBaseContext
 
-            val factoryOptions = PeerConnectionFactory.Options().apply {
-                disableEncryption = false
-                disableNetworkMonitor = false
-            }
+            val encoderFactory = DefaultVideoEncoderFactory(eglContext, true, true)
+            val decoderFactory = org.webrtc.DefaultVideoDecoderFactory(eglContext)
 
             peerConnectionFactory = PeerConnectionFactory.builder()
-                .setOptions(factoryOptions)
+                .setVideoEncoderFactory(encoderFactory)
+                .setVideoDecoderFactory(decoderFactory)
                 .createPeerConnectionFactory()
 
             surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglContext)
@@ -119,6 +141,7 @@ class StreamService : Service() {
         val metrics = DisplayMetrics()
         val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         val defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
+        @Suppress("DEPRECATION")
         defaultDisplay.getRealMetrics(metrics)
 
         // Target 1280x720 landscape. Preserve aspect ratio and cap dimensions.
@@ -142,9 +165,183 @@ class StreamService : Service() {
 
             streamRepository.setStreaming(true)
             LogStore.log(TAG, "Screen capture started ${width}x${height} @ ${TARGET_FPS}fps")
+
+            createStreamAndConnect()
         } catch (e: Exception) {
             LogStore.logError(TAG, "Failed to start screen capture", e)
             stopStreaming()
+        }
+    }
+
+    private fun createStreamAndConnect() {
+        val serverUrl = streamRepository.getServerUrl()
+        val request = Request.Builder()
+            .url("$serverUrl/stream")
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+
+        httpClient.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                LogStore.logError(TAG, "Failed to create stream session", e)
+                stopStreaming()
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val body = response.body?.string() ?: ""
+                if (!response.isSuccessful || body.isBlank()) {
+                    LogStore.log(TAG, "Failed to create stream session: ${response.code}")
+                    stopStreaming()
+                    return
+                }
+                try {
+                    val json = JSONObject(body)
+                    val streamId = json.getString("streamId")
+                    val token = json.getString("token")
+                    val viewerUrl = json.getString("viewerUrl")
+
+                    streamRepository.setStreamCredentials(streamId, token, viewerUrl)
+                    runOnMainThread { connectPeer(streamId, token, viewerUrl) }
+                } catch (e: Exception) {
+                    LogStore.logError(TAG, "Failed to parse stream session", e)
+                    stopStreaming()
+                }
+            }
+        })
+    }
+
+    private fun connectPeer(streamId: String, token: String, viewerUrl: String) {
+        try {
+            val rtcConfig = PeerConnection.RTCConfiguration(buildIceServers()).apply {
+                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_ONCE
+            }
+
+            peerConnection = peerConnectionFactory?.createPeerConnection(rtcConfig, peerConnectionObserver)?.apply {
+                videoTrack?.let { addTrack(it) }
+            }
+
+            signalingClient = SignalingClient(
+                streamRepository.getServerUrl(),
+                streamId,
+                token,
+                signalingListener
+            ).apply { connect() }
+
+            LogStore.log(TAG, "Peer connection created, viewer link: $viewerUrl")
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Failed to create peer connection", e)
+            stopStreaming()
+        }
+    }
+
+    private fun buildIceServers(): List<PeerConnection.IceServer> {
+        // TODO: fetch ICE config from server /ice-config for dynamic TURN fallback.
+        return listOf(
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+        )
+    }
+
+    private val signalingListener = object : SignalingClient.Listener {
+        override fun onConnected() {
+            LogStore.log(TAG, "Signaling connected, waiting for viewer")
+        }
+
+        override fun onViewerJoined() {
+            LogStore.log(TAG, "Viewer joined, creating offer")
+            createOffer()
+        }
+
+        override fun onOfferAnswerReceived(sdpType: String, sdp: String) {
+            if (sdpType == "answer") {
+                LogStore.log(TAG, "Received answer, setting remote description")
+                peerConnection?.setRemoteDescription(
+                    sdpObserver("set-remote-answer"),
+                    SessionDescription(SessionDescription.Type.ANSWER, sdp)
+                )
+            }
+        }
+
+        override fun onIceCandidateReceived(sdpMid: String, sdpMLineIndex: Int, candidate: String) {
+            peerConnection?.addIceCandidate(IceCandidate(sdpMid, sdpMLineIndex, candidate))
+        }
+
+        override fun onDisconnected() {
+            LogStore.log(TAG, "Viewer disconnected")
+        }
+
+        override fun onError(message: String) {
+            LogStore.log(TAG, "Signaling error: $message")
+        }
+    }
+
+    private val peerConnectionObserver = object : PeerConnection.Observer {
+        override fun onSignalingChange(newState: PeerConnection.SignalingState) {
+            LogStore.log(TAG, "Signaling state: $newState")
+        }
+
+        override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
+            LogStore.log(TAG, "ICE connection state: $newState")
+            if (newState == PeerConnection.IceConnectionState.FAILED) {
+                stopStreaming()
+            }
+        }
+
+        override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+        override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {}
+        override fun onIceCandidate(candidate: IceCandidate?) {
+            candidate?.let {
+                signalingClient?.sendIceCandidate(it.sdpMid, it.sdpMLineIndex, it.sdp)
+            }
+        }
+
+        override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
+        override fun onAddStream(stream: org.webrtc.MediaStream?) {}
+        override fun onRemoveStream(stream: org.webrtc.MediaStream?) {}
+        override fun onDataChannel(dc: org.webrtc.DataChannel?) {}
+        override fun onRenegotiationNeeded() {}
+        override fun onAddTrack(receiver: org.webrtc.RtpReceiver?, streams: Array<out org.webrtc.MediaStream>?) {}
+        override fun onRemoveTrack(receiver: org.webrtc.RtpReceiver?) {}
+        override fun onSelectedCandidatePairChanged(event: org.webrtc.CandidatePairChangeEvent?) {}
+        override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
+            LogStore.log(TAG, "Peer connection state: $newState")
+        }
+        override fun onStandardizedIceConnectionChange(newState: PeerConnection.IceConnectionState?) {}
+        override fun onTrack(transceiver: org.webrtc.RtpTransceiver?) {}
+    }
+
+    private fun createOffer() {
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
+        }
+        peerConnection?.createOffer(object : org.webrtc.SdpObserver {
+            override fun onCreateSuccess(sdp: SessionDescription) {
+                LogStore.log(TAG, "Offer created")
+                peerConnection?.setLocalDescription(sdpObserver("set-local-offer"), sdp)
+                signalingClient?.sendOffer(sdp.type.canonicalForm(), sdp.description)
+            }
+
+            override fun onSetSuccess() {}
+            override fun onCreateFailure(error: String) {
+                LogStore.log(TAG, "Failed to create offer: $error")
+            }
+            override fun onSetFailure(error: String) {
+                LogStore.log(TAG, "Failed to set local offer: $error")
+            }
+        }, constraints)
+    }
+
+    private fun sdpObserver(label: String) = object : org.webrtc.SdpObserver {
+        override fun onCreateSuccess(sdp: SessionDescription) {}
+        override fun onSetSuccess() {
+            LogStore.log(TAG, "$label succeeded")
+        }
+        override fun onCreateFailure(error: String) {
+            LogStore.log(TAG, "$label create failure: $error")
+        }
+        override fun onSetFailure(error: String) {
+            LogStore.log(TAG, "$label set failure: $error")
         }
     }
 
@@ -156,7 +353,6 @@ class StreamService : Service() {
             screenHeight to screenWidth
         }
 
-        // Scale to fit inside target box while preserving aspect ratio.
         val scale = minOf(targetWidth.toFloat() / longer, targetHeight.toFloat() / shorter, 1f)
         val w = (longer * scale).toInt() and 0xFFFE
         val h = (shorter * scale).toInt() and 0xFFFE
@@ -210,6 +406,12 @@ class StreamService : Service() {
     private fun stopStreaming() {
         LogStore.log(TAG, "Stopping stream")
         try {
+            signalingClient?.disconnect()
+            signalingClient = null
+
+            peerConnection?.close()
+            peerConnection = null
+
             capturer?.stopCapture()
             capturer?.dispose()
             capturer = null
@@ -229,6 +431,8 @@ class StreamService : Service() {
 
             peerConnectionFactory?.dispose()
             peerConnectionFactory = null
+
+            httpClient.dispatcher.cancelAll()
         } catch (e: Exception) {
             LogStore.logError(TAG, "Error during stream teardown", e)
         }
@@ -241,6 +445,14 @@ class StreamService : Service() {
     override fun onDestroy() {
         stopStreaming()
         super.onDestroy()
+    }
+
+    private fun runOnMainThread(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            Handler(Looper.getMainLooper()).post(block)
+        }
     }
 
     companion object {

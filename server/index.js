@@ -137,6 +137,9 @@ function handleWebSocket(ws, req) {
     }
     room.sender = ws;
     console.log(`[room ${streamId}] sender connected`);
+    if (room.viewer) {
+      send(ws, { type: 'viewer-joined' });
+    }
   } else if (role === 'viewer') {
     if (token !== room.token) {
       ws.close(4003, 'Invalid token');
@@ -148,6 +151,7 @@ function handleWebSocket(ws, req) {
     }
     room.viewer = ws;
     console.log(`[room ${streamId}] viewer connected`);
+    send(room.sender, { type: 'viewer-joined' });
   } else {
     ws.close(4001, 'Invalid role');
     return;
