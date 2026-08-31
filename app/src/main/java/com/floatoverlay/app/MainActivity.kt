@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.viewpager2.widget.ViewPager2
 import com.floatoverlay.app.ui.stream.StreamFragment
 import com.floatoverlay.app.stream.StreamService
+import com.floatoverlay.app.data.StreamRepository
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
@@ -58,7 +59,15 @@ class MainActivity : AppCompatActivity(), StreamFragment.StreamLauncher {
     ) { result ->
         val data = result.data
         if (result.resultCode == RESULT_OK && data != null) {
-            StreamService.start(this, result.resultCode, data)
+            val repo = StreamRepository(this)
+            StreamService.start(
+                this,
+                result.resultCode,
+                data,
+                repo.getVideoWidth(),
+                repo.getVideoHeight(),
+                repo.getVideoFps()
+            )
         } else {
             Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
         }

@@ -93,10 +93,13 @@ class StreamService : Service() {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
                 @Suppress("DEPRECATION")
                 val data = intent.getParcelableExtra<Intent>(EXTRA_DATA)
+                val width = intent.getIntExtra(EXTRA_VIDEO_WIDTH, StreamRepository.DEFAULT_VIDEO_WIDTH)
+                val height = intent.getIntExtra(EXTRA_VIDEO_HEIGHT, StreamRepository.DEFAULT_VIDEO_HEIGHT)
+                val fps = intent.getIntExtra(EXTRA_VIDEO_FPS, StreamRepository.DEFAULT_VIDEO_FPS)
                 if (data != null && resultCode == Activity.RESULT_OK) {
                     // Start foreground immediately to satisfy Android 12+ deadlines.
                     startForegroundWithNotification()
-                    startStreaming(data)
+                    startStreaming(data, width, height, fps)
                 } else {
                     LogStore.log(TAG, "Start stream requested without MediaProjection permission")
                     stopSelf()
@@ -138,7 +141,7 @@ class StreamService : Service() {
         }
     }
 
-    private fun startStreaming(data: Intent) {
+    private fun startStreaming(data: Intent, targetWidth: Int, targetHeight: Int, targetFps: Int) {
         if (capturer != null) {
             LogStore.log(TAG, "Stream already active")
             return
@@ -156,8 +159,8 @@ class StreamService : Service() {
         @Suppress("DEPRECATION")
         defaultDisplay.getRealMetrics(metrics)
 
-        // Target 1280x720 landscape. Preserve aspect ratio and cap dimensions.
-        val (width, height) = computeLandscapeSize(metrics.widthPixels, metrics.heightPixels, TARGET_WIDTH, TARGET_HEIGHT)
+        // Scale the phone's current landscape size to fit within the selected target resolution.
+        val (width, height) = computeLandscapeSize(metrics.widthPixels, metrics.heightPixels, targetWidth, targetHeight)
 
         try {
             val source = peerConnectionFactory!!.createVideoSource(true)
@@ -170,7 +173,7 @@ class StreamService : Service() {
                 }
             }).apply {
                 initialize(surfaceTextureHelper, applicationContext, source.capturerObserver)
-                startCapture(width, height, TARGET_FPS)
+                startCapture(width, height, targetFps)
             }
 
             videoTrack = peerConnectionFactory?.createVideoTrack(VIDEO_TRACK_ID, source)
@@ -189,7 +192,7 @@ class StreamService : Service() {
             })
 
             streamRepository.setStreaming(true)
-            LogStore.log(TAG, "Screen capture started ${width}x${height} @ ${TARGET_FPS}fps")
+            LogStore.log(TAG, "Screen capture started ${width}x${height} @ ${targetFps}fps")
 
             createStreamAndConnect()
         } catch (e: Exception) {
@@ -546,20 +549,23 @@ class StreamService : Service() {
         private const val CHANNEL_ID = "float_stream_channel"
         private const val FOREGROUND_SERVICE_ID = 2
 
-        private const val TARGET_WIDTH = 1280
-        private const val TARGET_HEIGHT = 720
-        private const val TARGET_FPS = 30
-
         private const val VIDEO_TRACK_ID = "screen_video"
+
+        const val EXTRA_VIDEO_WIDTH = "video_width"
+        const val EXTRA_VIDEO_HEIGHT = "video_height"
+        const val EXTRA_VIDEO_FPS = "video_fps"
 
         @Volatile
         private var factoryInitialized = false
 
-        fun start(context: Context, resultCode: Int, data: Intent) {
+        fun start(context: Context, resultCode: Int, data: Intent, width: Int, height: Int, fps: Int) {
             val intent = Intent(context, StreamService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_DATA, data)
+                putExtra(EXTRA_VIDEO_WIDTH, width)
+                putExtra(EXTRA_VIDEO_HEIGHT, height)
+                putExtra(EXTRA_VIDEO_FPS, fps)
             }
             ContextCompat.startForegroundService(context, intent)
         }

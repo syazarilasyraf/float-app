@@ -58,6 +58,29 @@ class StreamRepository(context: Context) {
             .apply()
     }
 
+    fun getVideoWidth(): Int {
+        return prefs.getInt(KEY_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH)
+    }
+
+    fun getVideoHeight(): Int {
+        return prefs.getInt(KEY_VIDEO_HEIGHT, DEFAULT_VIDEO_HEIGHT)
+    }
+
+    fun getVideoFps(): Int {
+        return prefs.getInt(KEY_VIDEO_FPS, DEFAULT_VIDEO_FPS)
+    }
+
+    fun setVideoResolution(width: Int, height: Int) {
+        prefs.edit()
+            .putInt(KEY_VIDEO_WIDTH, width)
+            .putInt(KEY_VIDEO_HEIGHT, height)
+            .apply()
+    }
+
+    fun setVideoFps(fps: Int) {
+        prefs.edit().putInt(KEY_VIDEO_FPS, fps).apply()
+    }
+
     fun registerListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
         prefs.registerOnSharedPreferenceChangeListener(listener)
     }
@@ -73,7 +96,18 @@ class StreamRepository(context: Context) {
         const val KEY_STREAM_ID = "stream_id"
         const val KEY_STREAM_TOKEN = "stream_token"
         const val KEY_VIEWER_URL = "viewer_url"
+        const val KEY_VIDEO_WIDTH = "video_width"
+        const val KEY_VIDEO_HEIGHT = "video_height"
+        const val KEY_VIDEO_FPS = "video_fps"
 
         private const val DEFAULT_SERVER_URL = "http://192.168.1.100:3000"
+
+        const val DEFAULT_VIDEO_WIDTH = 1280
+        const val DEFAULT_VIDEO_HEIGHT = 720
+        const val DEFAULT_VIDEO_FPS = 30
+
+        val QUALITY_480P = Pair(854, 480)
+        val QUALITY_720P = Pair(1280, 720)
+        val QUALITY_1080P = Pair(1920, 1080)
     }
 }
