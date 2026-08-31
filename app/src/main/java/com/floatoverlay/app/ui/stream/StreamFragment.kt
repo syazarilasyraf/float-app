@@ -13,8 +13,6 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
@@ -32,7 +30,7 @@ import com.floatoverlay.app.stream.StreamService
  *
  * Lightweight control panel:
  * - status label
- * - server mode (local / internet) and URL
+ * - local server URL
  * - quality / FPS selection
  * - audio toggle
  * - viewer link
@@ -48,10 +46,6 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
     private lateinit var statsText: TextView
     private lateinit var linkText: TextView
     private lateinit var serverUrlInput: TextInputEditText
-    private lateinit var modeGroup: RadioGroup
-    private lateinit var modeLocal: RadioButton
-    private lateinit var modeInternet: RadioButton
-    private lateinit var modeHintText: TextView
     private lateinit var qualitySpinner: Spinner
     private lateinit var fpsSpinner: Spinner
     private lateinit var audioSwitch: MaterialSwitch
@@ -121,10 +115,6 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
         statsText = view.findViewById(R.id.streamStatsText)
         linkText = view.findViewById(R.id.streamLinkText)
         serverUrlInput = view.findViewById(R.id.serverUrlInput)
-        modeGroup = view.findViewById(R.id.serverModeGroup)
-        modeLocal = view.findViewById(R.id.modeLocal)
-        modeInternet = view.findViewById(R.id.modeInternet)
-        modeHintText = view.findViewById(R.id.modeHintText)
         qualitySpinner = view.findViewById(R.id.qualitySpinner)
         fpsSpinner = view.findViewById(R.id.fpsSpinner)
         audioSwitch = view.findViewById(R.id.audioSwitch)
@@ -132,16 +122,16 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
         stopButton = view.findViewById(R.id.stopStreamButton)
         copyLinkButton = view.findViewById(R.id.copyLinkButton)
 
-        setupModeSelection()
-        setupQualitySpinner()
-        setupFpsSpinner()
-        setupAudioSwitch()
-
+        serverUrlInput.setText(repository.getServerUrl())
         serverUrlInput.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) {
                 repository.setServerUrl(serverUrlInput.text.toString().trim())
             }
         }
+
+        setupQualitySpinner()
+        setupFpsSpinner()
+        setupAudioSwitch()
 
         startButton.setOnClickListener {
             repository.setServerUrl(serverUrlInput.text.toString().trim())
@@ -168,31 +158,6 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
     override fun onResume() {
         super.onResume()
         updateUi()
-    }
-
-    private fun setupModeSelection() {
-        if (repository.isInternetMode()) {
-            modeInternet.isChecked = true
-        } else {
-            modeLocal.isChecked = true
-        }
-        syncUrlInput()
-
-        modeGroup.setOnCheckedChangeListener { _, checkedId ->
-            val internet = checkedId == R.id.modeInternet
-            repository.setInternetMode(internet)
-            syncUrlInput()
-            updateUi()
-        }
-    }
-
-    private fun syncUrlInput() {
-        serverUrlInput.setText(repository.getServerUrl())
-        if (repository.isInternetMode()) {
-            modeHintText.text = "Use a public HTTPS server with a domain (e.g. https://stream.example.com)."
-        } else {
-            modeHintText.text = "Use the same Wi-Fi as the viewer."
-        }
     }
 
     private fun setupQualitySpinner() {
@@ -286,9 +251,6 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
             qualitySpinner.isEnabled = false
             fpsSpinner.isEnabled = false
             audioSwitch.isEnabled = false
-            modeGroup.isEnabled = false
-            modeLocal.isEnabled = false
-            modeInternet.isEnabled = false
             serverUrlInput.isEnabled = false
         } else {
             statusText.text = "Status: OFFLINE"
@@ -300,9 +262,6 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
             qualitySpinner.isEnabled = true
             fpsSpinner.isEnabled = true
             audioSwitch.isEnabled = true
-            modeGroup.isEnabled = true
-            modeLocal.isEnabled = true
-            modeInternet.isEnabled = true
             serverUrlInput.isEnabled = true
         }
     }

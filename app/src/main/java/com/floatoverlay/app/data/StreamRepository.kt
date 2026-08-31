@@ -15,35 +15,11 @@ class StreamRepository(context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun getServerUrl(): String {
-        return if (isInternetMode()) {
-            prefs.getString(KEY_PUBLIC_SERVER_URL, DEFAULT_PUBLIC_SERVER_URL) ?: DEFAULT_PUBLIC_SERVER_URL
-        } else {
-            prefs.getString(KEY_LOCAL_SERVER_URL, DEFAULT_LOCAL_SERVER_URL) ?: DEFAULT_LOCAL_SERVER_URL
-        }
+        return prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
     }
 
     fun setServerUrl(url: String) {
-        if (isInternetMode()) {
-            prefs.edit().putString(KEY_PUBLIC_SERVER_URL, url).apply()
-        } else {
-            prefs.edit().putString(KEY_LOCAL_SERVER_URL, url).apply()
-        }
-    }
-
-    fun getLocalServerUrl(): String {
-        return prefs.getString(KEY_LOCAL_SERVER_URL, DEFAULT_LOCAL_SERVER_URL) ?: DEFAULT_LOCAL_SERVER_URL
-    }
-
-    fun getPublicServerUrl(): String {
-        return prefs.getString(KEY_PUBLIC_SERVER_URL, DEFAULT_PUBLIC_SERVER_URL) ?: DEFAULT_PUBLIC_SERVER_URL
-    }
-
-    fun isInternetMode(): Boolean {
-        return prefs.getBoolean(KEY_INTERNET_MODE, false)
-    }
-
-    fun setInternetMode(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_INTERNET_MODE, enabled).apply()
+        prefs.edit().putString(KEY_SERVER_URL, url).apply()
     }
 
     fun setStreaming(isStreaming: Boolean) {
@@ -123,9 +99,7 @@ class StreamRepository(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "FloatStreamPrefs"
-        const val KEY_LOCAL_SERVER_URL = "local_server_url"
-        const val KEY_PUBLIC_SERVER_URL = "public_server_url"
-        const val KEY_INTERNET_MODE = "internet_mode"
+        const val KEY_SERVER_URL = "stream_server_url"
         const val KEY_IS_STREAMING = "is_streaming"
         const val KEY_STREAM_ID = "stream_id"
         const val KEY_STREAM_TOKEN = "stream_token"
@@ -135,8 +109,7 @@ class StreamRepository(context: Context) {
         const val KEY_VIDEO_FPS = "video_fps"
         const val KEY_AUDIO_ENABLED = "audio_enabled"
 
-        private const val DEFAULT_LOCAL_SERVER_URL = "http://192.168.1.100:3000"
-        private const val DEFAULT_PUBLIC_SERVER_URL = "https://stream.example.com"
+        private const val DEFAULT_SERVER_URL = "http://192.168.1.100:3000"
 
         const val DEFAULT_VIDEO_WIDTH = 1280
         const val DEFAULT_VIDEO_HEIGHT = 720

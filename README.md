@@ -32,7 +32,7 @@ Float is a lightweight Android companion for mobile gamers. It provides floating
 ### Private Screen Streaming
 - Stream your phone screen privately to a browser viewer over WebRTC.
 - One streamer, one viewer.
-- Works over local Wi-Fi or the Internet.
+- Works over local Wi-Fi.
 - Configurable quality (480p / 720p / 1080p) and frame rate (30 / 60 FPS).
 - Optional microphone audio toggle.
 - Minimal Node.js signaling server; no video is stored or transcoded on the server.
@@ -96,7 +96,7 @@ On every push to `main`/`master`, the workflow in `.github/workflows/build-apk.y
 4. Tap **Start Overlay**. The small floating circle icon appears.
 5. Open your game. Tap the floating icon to show/hide the overlays.
 6. Long-press and drag an overlay to move it, or drag the resize handle to resize.
-7. On the **Stream** tab, choose **Local network** or **Internet**, set the signaling server URL, and tap **Start Stream**.
+7. On the **Stream** tab, set the local signaling server URL and tap **Start Stream**.
 8. Grant screen capture permission.
 9. Copy the viewer link and send it to your viewer.
 10. Open your game. The stream continues through the foreground service.
