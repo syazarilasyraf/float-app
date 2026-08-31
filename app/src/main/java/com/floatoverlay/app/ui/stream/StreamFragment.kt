@@ -1,9 +1,11 @@
 package com.floatoverlay.app.ui.stream
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -11,10 +13,15 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.textfield.TextInputEditText
 import com.floatoverlay.app.R
 import com.floatoverlay.app.data.StreamRepository
@@ -25,8 +32,9 @@ import com.floatoverlay.app.stream.StreamService
  *
  * Lightweight control panel:
  * - status label
- * - server URL
+ * - server mode (local / internet) and URL
  * - quality / FPS selection
+ * - audio toggle
  * - viewer link
  * - start/stop/copy buttons
  *
@@ -40,8 +48,13 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
     private lateinit var statsText: TextView
     private lateinit var linkText: TextView
     private lateinit var serverUrlInput: TextInputEditText
+    private lateinit var modeGroup: RadioGroup
+    private lateinit var modeLocal: RadioButton
+    private lateinit var modeInternet: RadioButton
+    private lateinit var modeHintText: TextView
     private lateinit var qualitySpinner: Spinner
     private lateinit var fpsSpinner: Spinner
+    private lateinit var audioSwitch: MaterialSwitch
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
     private lateinit var copyLinkButton: Button
@@ -53,6 +66,24 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
     )
 
     private val fpsOptions = listOf(30, 60)
+
+    private var pendingStreamStart = false
+
+    private val audioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            if (pendingStreamStart) {
+                pendingStreamStart = false
+                (activity as? StreamLauncher)?.requestStartStream()
+            }
+        } else {
+            pendingStreamStart = false
+            audioSwitch.isChecked = false
+            repository.setAudioEnabled(false)
+            Toast.makeText(requireContext(), "Microphone audio disabled: permission denied", Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,26 +121,32 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
         statsText = view.findViewById(R.id.streamStatsText)
         linkText = view.findViewById(R.id.streamLinkText)
         serverUrlInput = view.findViewById(R.id.serverUrlInput)
+        modeGroup = view.findViewById(R.id.serverModeGroup)
+        modeLocal = view.findViewById(R.id.modeLocal)
+        modeInternet = view.findViewById(R.id.modeInternet)
+        modeHintText = view.findViewById(R.id.modeHintText)
         qualitySpinner = view.findViewById(R.id.qualitySpinner)
         fpsSpinner = view.findViewById(R.id.fpsSpinner)
+        audioSwitch = view.findViewById(R.id.audioSwitch)
         startButton = view.findViewById(R.id.startStreamButton)
         stopButton = view.findViewById(R.id.stopStreamButton)
         copyLinkButton = view.findViewById(R.id.copyLinkButton)
 
-        serverUrlInput.setText(repository.getServerUrl())
+        setupModeSelection()
+        setupQualitySpinner()
+        setupFpsSpinner()
+        setupAudioSwitch()
+
         serverUrlInput.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) {
                 repository.setServerUrl(serverUrlInput.text.toString().trim())
             }
         }
 
-        setupQualitySpinner()
-        setupFpsSpinner()
-
         startButton.setOnClickListener {
             repository.setServerUrl(serverUrlInput.text.toString().trim())
             saveStreamSettings()
-            (activity as? StreamLauncher)?.requestStartStream()
+            startStreamWithPermissionCheck()
         }
 
         stopButton.setOnClickListener {
@@ -131,6 +168,31 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
     override fun onResume() {
         super.onResume()
         updateUi()
+    }
+
+    private fun setupModeSelection() {
+        if (repository.isInternetMode()) {
+            modeInternet.isChecked = true
+        } else {
+            modeLocal.isChecked = true
+        }
+        syncUrlInput()
+
+        modeGroup.setOnCheckedChangeListener { _, checkedId ->
+            val internet = checkedId == R.id.modeInternet
+            repository.setInternetMode(internet)
+            syncUrlInput()
+            updateUi()
+        }
+    }
+
+    private fun syncUrlInput() {
+        serverUrlInput.setText(repository.getServerUrl())
+        if (repository.isInternetMode()) {
+            modeHintText.text = "Use a public HTTPS server with a domain (e.g. https://stream.example.com)."
+        } else {
+            modeHintText.text = "Use the same Wi-Fi as the viewer."
+        }
     }
 
     private fun setupQualitySpinner() {
@@ -175,11 +237,36 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
         }
     }
 
+    private fun setupAudioSwitch() {
+        audioSwitch.isChecked = repository.isAudioEnabled()
+        audioSwitch.setOnCheckedChangeListener { _, isChecked ->
+            repository.setAudioEnabled(isChecked)
+        }
+    }
+
     private fun saveStreamSettings() {
         val quality = qualityOptions[qualitySpinner.selectedItemPosition]
         val fps = fpsOptions[fpsSpinner.selectedItemPosition]
         repository.setVideoResolution(quality.second, quality.third)
         repository.setVideoFps(fps)
+        repository.setAudioEnabled(audioSwitch.isChecked)
+    }
+
+    private fun startStreamWithPermissionCheck() {
+        if (!audioSwitch.isChecked) {
+            (activity as? StreamLauncher)?.requestStartStream()
+            return
+        }
+
+        when (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO)) {
+            PackageManager.PERMISSION_GRANTED -> {
+                (activity as? StreamLauncher)?.requestStartStream()
+            }
+            else -> {
+                pendingStreamStart = true
+                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
     }
 
     private fun updateUi() {
@@ -187,25 +274,36 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
         val link = repository.getViewerUrl()
         val quality = qualityOptions[qualitySpinner.selectedItemPosition].first
         val fps = fpsOptions[fpsSpinner.selectedItemPosition]
+        val audio = if (audioSwitch.isChecked) "Audio: on" else "Audio: off"
 
         if (isLive) {
             statusText.text = "Streaming \uD83D\uDD34 LIVE"
-            statsText.text = "Quality: $quality / ${fps} FPS\nBitrate: ~2.5 Mbps\nViewers: 1"
+            statsText.text = "Quality: $quality / ${fps} FPS\nBitrate: ~2.5 Mbps\n$audio\nViewers: 1"
             linkText.text = link
             startButton.isEnabled = false
             stopButton.isEnabled = true
             copyLinkButton.isEnabled = link.isNotBlank()
             qualitySpinner.isEnabled = false
             fpsSpinner.isEnabled = false
+            audioSwitch.isEnabled = false
+            modeGroup.isEnabled = false
+            modeLocal.isEnabled = false
+            modeInternet.isEnabled = false
+            serverUrlInput.isEnabled = false
         } else {
             statusText.text = "Status: OFFLINE"
-            statsText.text = "Quality: $quality / ${fps} FPS\nBitrate: ~2.5 Mbps"
+            statsText.text = "Quality: $quality / ${fps} FPS\nBitrate: ~2.5 Mbps\n$audio"
             linkText.text = ""
             startButton.isEnabled = true
             stopButton.isEnabled = false
             copyLinkButton.isEnabled = false
             qualitySpinner.isEnabled = true
             fpsSpinner.isEnabled = true
+            audioSwitch.isEnabled = true
+            modeGroup.isEnabled = true
+            modeLocal.isEnabled = true
+            modeInternet.isEnabled = true
+            serverUrlInput.isEnabled = true
         }
     }
 

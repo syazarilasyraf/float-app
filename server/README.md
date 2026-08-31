@@ -31,8 +31,49 @@ The server listens on `0.0.0.0:3000` by default.
 
 Copy `.env.example` to `.env` and adjust as needed.
 
-## Deploy
+## Deploy on the Internet
 
-Put this behind any server with a public IP or domain. Make sure the Android app is configured to point to `http://YOUR_SERVER:3000` in the Stream tab.
+For the viewer to connect from another network:
 
-If the sender and viewer are on different networks, you almost certainly need a TURN server for NAT/firewall fallback. The server does not provide TURN itself; configure one (e.g. coturn) and set `TURN_SERVERS`.
+1. Put this server behind a public address with HTTPS.
+2. Set `PUBLIC_URL` to that address (e.g. `https://stream.example.com`).
+3. Configure the Android Stream tab to **Internet** mode and enter the same URL.
+4. For NAT/firewall fallback, configure a TURN server and set `TURN_SERVERS`.
+
+### Why HTTPS matters
+
+Browsers require a secure context for WebRTC on the public Internet. Use HTTPS for `PUBLIC_URL`.
+
+### Cheapest hosting options
+
+- **VPS**: A tiny VM (1 vCPU, 512 MB RAM, ~$3-5/month) is enough for signaling. TURN bandwidth is the main cost if fallback is used.
+- **Cloudflare Tunnel**: Free. Run `cloudflared` on your home server/laptop to expose the local server over HTTPS without opening router ports. Good for personal use.
+- **Reverse proxy**: Caddy or nginx can provide HTTPS with a real certificate. Use Caddy if you want automatic HTTPS.
+
+### TURN server
+
+Direct peer-to-peer WebRTC usually works, but strict NAT/firewalls may need TURN. Options:
+
+- **coturn** on the same VPS.
+- A managed TURN service (e.g. Twilio, Metered, Xirsys) — pay per GB relayed.
+
+Set `TURN_SERVERS` like:
+
+```bash
+TURN_SERVERS="turn:stream.example.com:3478|user|pass"
+```
+
+### Bandwidth estimate (one 720p30 stream)
+
+- Normal WebRTC direct: **~2-3 Mbps upload** from the Pixel.
+- TURN relay: roughly the same amount passes through the TURN server.
+
+### Architecture summary
+
+```
+Pixel 9  --WebRTC-->  wife's browser
+           (direct peer-to-peer)
+
+Signaling server only relays SDP/ICE messages.
+Video never passes through the server unless TURN fallback is active.
+```

@@ -97,7 +97,8 @@
       <video id="remoteVideo" autoplay playsinline muted></video>
       <div id="latency">Latency: -- ms</div>
       <div id="controls">
-        <button id="fitBtn">Fit</button>
+        <button id="fitBtn">Fill</button>
+        <button id="muteBtn">Unmute</button>
         <button id="fullscreenBtn">Fullscreen</button>
       </div>
     </div>
@@ -110,6 +111,7 @@
     const latencyEl = document.getElementById('latency');
     const fullscreenBtn = document.getElementById('fullscreenBtn');
     const fitBtn = document.getElementById('fitBtn');
+    const muteBtn = document.getElementById('muteBtn');
 
     let fitMode = 'contain';
     fitBtn.textContent = 'Fill';
@@ -131,6 +133,12 @@
       } else {
         document.documentElement.requestFullscreen();
       }
+    });
+
+    muteBtn.addEventListener('click', () => {
+      video.muted = !video.muted;
+      muteBtn.textContent = video.muted ? 'Unmute' : 'Mute';
+      video.play().catch((e) => console.error('unmute play failed', e));
     });
 
     async function connect() {
@@ -210,7 +218,6 @@
       };
 
       video.addEventListener('click', () => {
-        video.muted = true;
         video.play().catch((e) => console.error('click play failed', e));
       });
 

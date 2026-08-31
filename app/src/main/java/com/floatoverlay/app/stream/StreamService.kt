@@ -29,6 +29,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import org.json.JSONArray
 import org.json.JSONObject
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
@@ -59,6 +60,9 @@ class StreamService : Service() {
     private var capturer: ScreenCapturerAndroid? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
+    private var audioSource: org.webrtc.AudioSource? = null
+    private var audioTrack: org.webrtc.AudioTrack? = null
+    private var audioDeviceModule: org.webrtc.audio.AudioDeviceModule? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var eglBase: EglBase? = null
     private var peerConnectionFactory: PeerConnectionFactory? = null
@@ -129,9 +133,15 @@ class StreamService : Service() {
             val encoderFactory = DefaultVideoEncoderFactory(eglContext, true, false)
             val decoderFactory = org.webrtc.DefaultVideoDecoderFactory(eglContext)
 
+            audioDeviceModule = org.webrtc.audio.JavaAudioDeviceModule.builder(applicationContext)
+                .setUseHardwareAcousticEchoCanceler(false)
+                .setUseHardwareNoiseSuppressor(false)
+                .createAudioDeviceModule()
+
             peerConnectionFactory = PeerConnectionFactory.builder()
                 .setVideoEncoderFactory(encoderFactory)
                 .setVideoDecoderFactory(decoderFactory)
+                .setAudioDeviceModule(audioDeviceModule)
                 .createPeerConnectionFactory()
 
             surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglContext)
@@ -177,6 +187,18 @@ class StreamService : Service() {
             }
 
             videoTrack = peerConnectionFactory?.createVideoTrack(VIDEO_TRACK_ID, source)
+
+            if (streamRepository.isAudioEnabled()) {
+                val audioConstraints = MediaConstraints().apply {
+                    optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                    optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+                }
+                audioSource = peerConnectionFactory?.createAudioSource(audioConstraints)
+                audioTrack = peerConnectionFactory?.createAudioTrack(AUDIO_TRACK_ID, audioSource)
+                audioTrack?.setEnabled(true)
+                LogStore.log(TAG, "Audio track created (microphone)")
+            }
+
             videoTrack?.addSink(object : VideoSink {
                 private var frameCount = 0
                 private var lastLog = System.currentTimeMillis()
@@ -238,10 +260,36 @@ class StreamService : Service() {
     }
 
     private fun connectPeer(streamId: String, token: String, viewerUrl: String) {
+        val serverUrl = streamRepository.getServerUrl()
+        val iceRequest = Request.Builder()
+            .url("$serverUrl/ice-config")
+            .get()
+            .build()
+
+        httpClient.newCall(iceRequest).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                LogStore.logError(TAG, "Failed to fetch ICE config, using defaults", e)
+                runOnMainThread { createPeerConnection(defaultIceServers(), streamId, token, viewerUrl) }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val servers = try {
+                    val body = response.body?.string() ?: ""
+                    parseIceServers(body)
+                } catch (e: Exception) {
+                    LogStore.logError(TAG, "Failed to parse ICE config, using defaults", e)
+                    defaultIceServers()
+                }
+                runOnMainThread { createPeerConnection(servers, streamId, token, viewerUrl) }
+            }
+        })
+    }
+
+    private fun createPeerConnection(iceServers: List<PeerConnection.IceServer>, streamId: String, token: String, viewerUrl: String) {
         try {
-            val rtcConfig = PeerConnection.RTCConfiguration(buildIceServers()).apply {
+            val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_ONCE
+                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             }
 
             peerConnection = peerConnectionFactory?.createPeerConnection(rtcConfig, peerConnectionObserver)?.apply {
@@ -251,6 +299,13 @@ class StreamService : Service() {
                         RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                     )
                     LogStore.log(TAG, "Video transceiver added: direction=${transceiver?.direction}, mid=${transceiver?.mid}")
+                }
+                audioTrack?.let { track ->
+                    val transceiver = addTransceiver(
+                        track,
+                        RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                    )
+                    LogStore.log(TAG, "Audio transceiver added: direction=${transceiver?.direction}, mid=${transceiver?.mid}")
                 }
             }
 
@@ -270,12 +325,34 @@ class StreamService : Service() {
         }
     }
 
-    private fun buildIceServers(): List<PeerConnection.IceServer> {
-        // TODO: fetch ICE config from server /ice-config for dynamic TURN fallback.
+    private fun defaultIceServers(): List<PeerConnection.IceServer> {
         return listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
         )
+    }
+
+    private fun parseIceServers(json: String): List<PeerConnection.IceServer> {
+        val root = JSONObject(json)
+        val array = root.getJSONArray("iceServers")
+        val servers = mutableListOf<PeerConnection.IceServer>()
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            val urls = obj.get("urls")
+            val builder = when (urls) {
+                is String -> PeerConnection.IceServer.builder(urls)
+                is JSONArray -> {
+                    val list = mutableListOf<String>()
+                    for (j in 0 until urls.length()) list.add(urls.getString(j))
+                    PeerConnection.IceServer.builder(list)
+                }
+                else -> continue
+            }
+            if (obj.has("username")) builder.setUsername(obj.getString("username"))
+            if (obj.has("credential")) builder.setPassword(obj.getString("credential"))
+            servers.add(builder.createIceServer())
+        }
+        return servers
     }
 
     private val signalingListener = object : SignalingClient.Listener {
@@ -499,6 +576,12 @@ class StreamService : Service() {
             videoTrack?.dispose()
             videoTrack = null
 
+            audioTrack?.dispose()
+            audioTrack = null
+
+            audioSource?.dispose()
+            audioSource = null
+
             videoSource?.dispose()
             videoSource = null
 
@@ -511,6 +594,13 @@ class StreamService : Service() {
 
             peerConnectionFactory?.dispose()
             peerConnectionFactory = null
+
+            try {
+                audioDeviceModule?.release()
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Audio device module release failed", e)
+            }
+            audioDeviceModule = null
         } catch (e: Exception) {
             LogStore.logError(TAG, "Error during stream teardown", e)
         }
@@ -550,6 +640,7 @@ class StreamService : Service() {
         private const val FOREGROUND_SERVICE_ID = 2
 
         private const val VIDEO_TRACK_ID = "screen_video"
+        private const val AUDIO_TRACK_ID = "screen_audio"
 
         const val EXTRA_VIDEO_WIDTH = "video_width"
         const val EXTRA_VIDEO_HEIGHT = "video_height"

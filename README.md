@@ -1,12 +1,6 @@
 # Float
 
-Float is a personal AI workspace for Android. It started as a floating overlay app for mobile livestreamers and is evolving into a general AI-capable workspace where modules like Minecraft, coding, and research can live on top of a shared overlay engine.
-
-## Current Vision
-
-Float is your personal AI assistant that lives on your Android phone and can appear above other apps when you need it.
-
-Minecraft is the first module. The architecture is designed so future modules can reuse the same AI, tool, resource, overlay, and persistence systems.
+Float is a lightweight Android companion for mobile gamers. It provides floating overlays and a private, low-resource screen-streaming feature designed for one-to-one viewing.
 
 ## Features
 
@@ -19,50 +13,30 @@ Minecraft is the first module. The architecture is designed so future modules ca
 
 ### Overlay Customization
 - **Crop size** — width and height in dp.
-- **Position** — place anywhere on screen as pixels from the left/top edges.
+- **Position** — place anywhere on screen.
 - **Opacity** — whole-overlay alpha.
 - **Background** — color, corner radius, or fully transparent.
-- **Content zoom** — scale the page content up or down (25%–300%).
-- **Content offset** — pan the page horizontally/vertically in pixels.
-- **Resize handle** — drag the bottom-right corner to resize on the fly.
-- **Touch-through mode** — when enabled, taps pass straight through the overlay to the game underneath.
+- **Content zoom** — scale page content (25%–300%).
+- **Content offset** — pan the page.
+- **Resize handle** — resize on the fly.
+- **Touch-through mode** — taps pass through to the game underneath.
 
-### Controls
-- **Auto-show overlays on start** — automatically open all enabled overlays when the service starts.
-- **Draggable floating icon** — a small circle icon stays on screen at all times. Tap it to show/hide overlays, drag it to move it out of the way.
-- **Notification badge counter** — shows pending donation/chat/viewer events on the floating icon. Clears when overlays are opened.
-
-### AI Assistant
-- Chat with Float from inside the app or as a floating overlay above other apps.
-- Conversation state, loading state, error state, and clear conversation.
-- Messages are persisted locally.
-- Provider abstraction: `AIProvider` with a `MockAIProvider` for offline development.
-- No API keys are embedded in the app.
-
-### Tool System
-- Extensible `AITool` architecture with a `ToolRegistry`.
-- The AI can request tool calls; the app executes them and returns results.
-- Mock tools for Minecraft: create project, add material, add build step.
-- Future modules can register their own tools without changing the AI core.
-
-### Minecraft Module
-- Create and manage Minecraft build projects.
-- Each project has references, materials, steps, notes, and progress.
-- Materials can be marked collected.
-- Steps can be completed.
-- Open any project as a floating Focus Mode overlay above Minecraft.
-- Focus Mode shows only the current reference, current step, navigation, and material progress.
-
-### Resource Architecture
-- `ResourceProvider` abstraction for future web/image search.
-- `MockResourceProvider` returns offline demo results.
+### Saved Videos
+- Share TikTok or YouTube links to Float.
+- Open saved videos as floating overlays.
 
 ### Game Launcher
 - A dedicated **Game** tab for launching Clash Royale in a freeform window.
-- Save window presets with custom size and position as percentages of the physical screen.
-- Built-in **Launch fullscreen** preset for normal play.
-- Switching presets while the game is running reuses the existing task when possible.
-- Freeform support depends on the device/ROM.
+- Save window presets with custom size and position.
+
+### Private Screen Streaming
+- Stream your phone screen privately to a browser viewer over WebRTC.
+- One streamer, one viewer.
+- Works over local Wi-Fi or the Internet.
+- Configurable quality (480p / 720p / 1080p) and frame rate (30 / 60 FPS).
+- Optional microphone audio toggle.
+- Minimal Node.js signaling server; no video is stored or transcoded on the server.
+- Designed for long-running background streaming while gaming.
 
 ## Architecture
 
@@ -70,25 +44,21 @@ Minecraft is the first module. The architecture is designed so future modules ca
 Float
 ├── Overlay Engine (FloatOverlayService)
 │   ├── Web overlays
-│   ├── Camera overlays
-│   ├── AI chat overlay
-│   └── Minecraft Focus Mode overlay
-├── Workspace
-│   ├── AI Assistant (AIProvider, AITool, Conversation)
-│   ├── Resource System (ResourceProvider)
-│   └── Local Data (Projects, References, Conversations)
-└── Modules
-    └── Minecraft (BuildProject, Material, BuildStep, Reference)
+│   └── Camera overlays
+├── Saved Videos
+├── Game Launcher
+└── Private Stream (WebRTC, MediaProjection, hardware H.264)
 ```
 
 ## Tech Stack
 
 - Kotlin
 - Android native XML Views
-- WebView for browser sources
+- WebView for browser-source overlays
 - `WindowManager` overlay (`TYPE_APPLICATION_OVERLAY`)
+- WebRTC (`com.github.webrtc-sdk:android`)
 - SharedPreferences + `org.json` for local persistence
-- No backend or account required
+- Minimal Node.js/WebSocket signaling server
 
 ## Requirements
 
@@ -126,26 +96,26 @@ On every push to `main`/`master`, the workflow in `.github/workflows/build-apk.y
 4. Tap **Start Overlay**. The small floating circle icon appears.
 5. Open your game. Tap the floating icon to show/hide the overlays.
 6. Long-press and drag an overlay to move it, or drag the resize handle to resize.
-7. Use the **AI** tab to chat with Float.
-8. Use the **Minecraft** tab to create build projects.
-9. Open a project and tap **Open in Float** to launch Focus Mode above Minecraft.
+7. On the **Stream** tab, choose **Local network** or **Internet**, set the signaling server URL, and tap **Start Stream**.
+8. Grant screen capture permission.
+9. Copy the viewer link and send it to your viewer.
+10. Open your game. The stream continues through the foreground service.
+
+## Streaming Server
+
+See [`server/README.md`](server/README.md) for setup, environment variables, TURN configuration, and deployment options.
 
 ## Permissions
 
 - `SYSTEM_ALERT_WINDOW` — draw overlays over other apps.
-- `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_SPECIAL_USE` — keep the overlay service running.
-- `INTERNET` — load browser-source URLs.
+- `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_SPECIAL_USE` / `FOREGROUND_SERVICE_MEDIA_PROJECTION` — keep overlay and stream services running.
+- `INTERNET` — load browser-source URLs and connect to the signaling server.
 - `CAMERA` — optional camera overlay feature.
+- `RECORD_AUDIO` — optional microphone audio in streams.
 
 ## Security
 
 - No API keys are embedded in source code.
-- No analytics.
-- No advertising.
-- No cloud sync or user accounts.
-
-## Notes
-
-- The floating icon is intentionally kept small so it blocks as little of the game as possible. Drag it to a corner if it covers a control.
-- Touch-through mode is on by default for new overlays.
-- The Game Launcher checks for the global Clash Royale package (`com.supercell.clashroyale`) and the Tencent/Chinese variant (`com.tencent.tmgp.supercell.clashroyale`).
+- No analytics, advertising, accounts, or public stream directory.
+- Private stream IDs are randomly generated and expire when the stream stops.
+- Video is peer-to-peer WebRTC; the signaling server does not store or process video.
