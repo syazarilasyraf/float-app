@@ -141,6 +141,99 @@
       video.play().catch((e) => console.error('unmute play failed', e));
     });
 
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+    const SAMPLE_RATE = 48000;
+    const CHANNELS = 2;
+    const SAMPLES_PER_10MS = SAMPLE_RATE / 100;
+    const BYTES_PER_CHUNK = SAMPLES_PER_10MS * CHANNELS * 2;
+    const JITTER_CHUNKS = 10;
+
+    let audioQueue = [];
+    let isPlaying = false;
+    let nextScheduleTime = 0;
+    let scheduleTimer = null;
+
+    function setupAudioPlayback(dc) {
+      dc.onopen = () => {
+        console.log('audio-pcm data channel open');
+      };
+      dc.onclose = () => {
+        console.log('audio-pcm data channel closed');
+        isPlaying = false;
+        audioQueue = [];
+        if (scheduleTimer) {
+          clearTimeout(scheduleTimer);
+          scheduleTimer = null;
+        }
+      };
+      dc.onerror = (err) => {
+        console.error('audio-pcm data channel error', err);
+        isPlaying = false;
+        audioQueue = [];
+        if (scheduleTimer) {
+          clearTimeout(scheduleTimer);
+          scheduleTimer = null;
+        }
+      };
+
+      dc.onmessage = (e) => {
+        const buffer = e.data;
+        if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 8 + BYTES_PER_CHUNK) {
+          console.warn('audio-pcm received unexpected message', buffer);
+          return;
+        }
+
+        const view = new DataView(buffer);
+        const timestampNs = view.getBigInt64(0, true);
+        const pcmBytes = new Uint8Array(buffer, 8, BYTES_PER_CHUNK);
+
+        const pcm16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength / 2);
+        const float32 = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) {
+          float32[i] = pcm16[i] / 32768.0;
+        }
+
+        audioQueue.push({ timestampNs, float32 });
+
+        if (!isPlaying && audioQueue.length >= JITTER_CHUNKS) {
+          // Resume AudioContext if it was suspended by the browser's autoplay policy.
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume().catch((err) => console.error('audio resume failed', err));
+          }
+          isPlaying = true;
+          nextScheduleTime = audioCtx.currentTime + 0.05;
+          schedulePlayback();
+        }
+      };
+    }
+
+    function schedulePlayback() {
+      if (!isPlaying) return;
+
+      while (audioQueue.length > 0 && nextScheduleTime < audioCtx.currentTime + 0.2) {
+        const chunk = audioQueue.shift();
+        const audioBuffer = audioCtx.createBuffer(CHANNELS, SAMPLES_PER_10MS, SAMPLE_RATE);
+
+        const left = audioBuffer.getChannelData(0);
+        const right = audioBuffer.getChannelData(1);
+        for (let i = 0; i < SAMPLES_PER_10MS; i++) {
+          left[i] = chunk.float32[i * 2];
+          right[i] = chunk.float32[i * 2 + 1];
+        }
+
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioCtx.destination);
+        source.start(nextScheduleTime);
+
+        nextScheduleTime += SAMPLES_PER_10MS / SAMPLE_RATE;
+      }
+
+      if (isPlaying) {
+        scheduleTimer = setTimeout(schedulePlayback, 10);
+      }
+    }
+
     async function connect() {
       setStatus('connecting', 'Connecting...');
 
@@ -163,6 +256,14 @@
       }
 
       const pc = new RTCPeerConnection(iceConfig);
+
+      pc.ondatachannel = (event) => {
+        const dc = event.channel;
+        if (dc.label === 'audio-pcm') {
+          setupAudioPlayback(dc);
+        }
+      };
+
       const ws = new WebSocket(`${window.location.protocol.replace('http', 'ws')}//${window.location.host}/ws/viewer/${streamId}?token=${token}`);
 
       ws.onopen = () => {

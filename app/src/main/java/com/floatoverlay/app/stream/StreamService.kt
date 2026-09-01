@@ -9,11 +9,17 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.hardware.display.DisplayManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioPlaybackCaptureConfiguration
+import android.media.AudioRecord
 import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.Display
 import androidx.core.app.NotificationCompat
@@ -31,6 +37,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
+import org.webrtc.DataChannel
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
 import org.webrtc.IceCandidate
@@ -46,6 +53,7 @@ import org.webrtc.VideoSink
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
 
 /**
@@ -68,6 +76,12 @@ class StreamService : Service() {
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var signalingClient: SignalingClient? = null
+    private var mediaProjection: MediaProjection? = null
+    private var audioRecord: AudioRecord? = null
+    private var audioDataChannel: DataChannel? = null
+    private var audioCaptureThread: Thread? = null
+    @Volatile
+    private var isAudioCapturing = false
     private var isStopping = false
     private val statsHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
@@ -103,7 +117,7 @@ class StreamService : Service() {
                 if (data != null && resultCode == Activity.RESULT_OK) {
                     // Start foreground immediately to satisfy Android 12+ deadlines.
                     startForegroundWithNotification()
-                    startStreaming(data, width, height, fps)
+                    startStreaming(resultCode, data, width, height, fps)
                 } else {
                     LogStore.log(TAG, "Start stream requested without MediaProjection permission")
                     stopSelf()
@@ -151,7 +165,7 @@ class StreamService : Service() {
         }
     }
 
-    private fun startStreaming(data: Intent, targetWidth: Int, targetHeight: Int, targetFps: Int) {
+    private fun startStreaming(resultCode: Int, data: Intent, targetWidth: Int, targetHeight: Int, targetFps: Int) {
         if (capturer != null) {
             LogStore.log(TAG, "Stream already active")
             return
@@ -173,12 +187,24 @@ class StreamService : Service() {
         val (width, height) = computeLandscapeSize(metrics.widthPixels, metrics.heightPixels, targetWidth, targetHeight)
 
         try {
+            // Own the MediaProjection token for audio playback capture and lifecycle.
+            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            mediaProjection = projectionManager.getMediaProjection(resultCode, data)?.apply {
+                registerCallback(object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        LogStore.log(TAG, "MediaProjection stopped by system")
+                        stopStreaming()
+                    }
+                }, null)
+            }
+
             val source = peerConnectionFactory!!.createVideoSource(true)
             videoSource = source
 
+            // ScreenCapturerAndroid creates its own MediaProjection from the same consent data.
             capturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
                 override fun onStop() {
-                    LogStore.log(TAG, "MediaProjection stopped by system")
+                    LogStore.log(TAG, "ScreenCapturer MediaProjection stopped by system")
                     stopStreaming()
                 }
             }).apply {
@@ -195,9 +221,13 @@ class StreamService : Service() {
                 }
                 audioSource = peerConnectionFactory?.createAudioSource(audioConstraints)
                 audioTrack = peerConnectionFactory?.createAudioTrack(AUDIO_TRACK_ID, audioSource)
-                audioTrack?.setEnabled(true)
-                LogStore.log(TAG, "Audio track created (microphone)")
+                // Disable the native mic track; internal audio is sent over the data channel.
+                audioTrack?.setEnabled(false)
+                LogStore.log(TAG, "Audio track created (microphone, disabled)")
             }
+
+            // Start internal audio capture. Failure here is non-fatal: video keeps streaming.
+            startInternalAudioCapture()
 
             videoTrack?.addSink(object : VideoSink {
                 private var frameCount = 0
@@ -307,6 +337,20 @@ class StreamService : Service() {
                     )
                     LogStore.log(TAG, "Audio transceiver added: direction=${transceiver?.direction}, mid=${transceiver?.mid}")
                 }
+
+                val dcInit = DataChannel.Init().apply {
+                    ordered = true
+                    maxRetransmits = -1
+                }
+                audioDataChannel = createDataChannel(DATA_CHANNEL_LABEL, dcInit)
+                audioDataChannel?.registerObserver(object : DataChannel.Observer {
+                    override fun onBufferedAmountChange(previousAmount: Long) {}
+                    override fun onStateChange() {
+                        LogStore.log(TAG, "Audio data channel state: ${audioDataChannel?.state()}")
+                    }
+                    override fun onMessage(buffer: DataChannel.Buffer) {}
+                })
+                LogStore.log(TAG, "Audio data channel created")
             }
 
             signalingClient = SignalingClient(
@@ -569,6 +613,47 @@ class StreamService : Service() {
             peerConnection?.close()
             peerConnection = null
 
+            // Stop internal audio capture before disposing the capturer so the audio thread
+            // does not reference a released AudioRecord.
+            isAudioCapturing = false
+            try {
+                // Stopping the record unblocks the capture thread's read() call.
+                audioRecord?.stop()
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "AudioRecord stop failed", e)
+            }
+            try {
+                audioCaptureThread?.join(1000)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            audioCaptureThread = null
+
+            try {
+                audioDataChannel?.close()
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Failed to close audio data channel", e)
+            }
+            audioDataChannel = null
+
+            // Release the record if the capture thread has not already done so.
+            val record = audioRecord
+            if (record != null) {
+                try {
+                    record.release()
+                } catch (e: Exception) {
+                    LogStore.logError(TAG, "AudioRecord release failed", e)
+                }
+                audioRecord = null
+            }
+
+            try {
+                mediaProjection?.stop()
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "MediaProjection stop failed", e)
+            }
+            mediaProjection = null
+
             capturer?.stopCapture()
             capturer?.dispose()
             capturer = null
@@ -627,6 +712,129 @@ class StreamService : Service() {
         }
     }
 
+    private fun startInternalAudioCapture() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            LogStore.log(TAG, "Internal audio capture requires Android 10+ (API 29), skipping audio")
+            return
+        }
+
+        val projection = mediaProjection
+        if (projection == null) {
+            LogStore.log(TAG, "MediaProjection not available, skipping internal audio capture")
+            return
+        }
+
+        try {
+            val config = createAudioPlaybackCaptureConfig(projection)
+            val minBuf = AudioRecord.getMinBufferSize(
+                AUDIO_SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_STEREO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            if (minBuf <= 0) {
+                LogStore.log(TAG, "AudioRecord min buffer size invalid ($minBuf), skipping audio")
+                return
+            }
+
+            val record = AudioRecord.Builder()
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(AUDIO_SAMPLE_RATE)
+                        .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .build()
+                )
+                .setBufferSizeInBytes(minBuf * 2)
+                .setAudioPlaybackCaptureConfig(config)
+                .build()
+
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
+                LogStore.log(TAG, "AudioRecord failed to initialize, skipping internal audio capture")
+                try {
+                    record.release()
+                } catch (e: Exception) {
+                    LogStore.logError(TAG, "Failed to release uninitialized AudioRecord", e)
+                }
+                return
+            }
+
+            audioRecord = record
+            startAudioCaptureThread(record)
+            LogStore.log(TAG, "Internal audio capture started (48kHz stereo 16-bit)")
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Failed to start internal audio capture", e)
+        }
+    }
+
+    private fun createAudioPlaybackCaptureConfig(mediaProjection: MediaProjection): AudioPlaybackCaptureConfiguration {
+        return AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+            .addMatchingUsage(AudioAttributes.USAGE_GAME)
+            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+            .build()
+    }
+
+    private fun startAudioCaptureThread(record: AudioRecord) {
+        isAudioCapturing = true
+        audioCaptureThread = Thread({
+            try {
+                record.startRecording()
+                val chunkBytes = ByteArray(BYTES_PER_CHUNK)
+                while (isAudioCapturing) {
+                    val read = readFullChunk(record, chunkBytes)
+                    if (read != BYTES_PER_CHUNK) {
+                        // Stop requested or read error; exit loop.
+                        break
+                    }
+
+                    val timestampNs = SystemClock.elapsedRealtimeNanos()
+                    val combined = ByteArray(TIMESTAMP_BYTES + BYTES_PER_CHUNK)
+                    ByteBuffer.wrap(combined)
+                        .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                        .putLong(timestampNs)
+                        .put(chunkBytes)
+
+                    val dc = audioDataChannel
+                    if (dc?.state() == DataChannel.State.OPEN) {
+                        val buffer = DataChannel.Buffer(ByteBuffer.wrap(combined), true)
+                        dc.send(buffer)
+                    }
+                }
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Audio capture thread error", e)
+            } finally {
+                try {
+                    record.stop()
+                } catch (e: Exception) {
+                    LogStore.logError(TAG, "AudioRecord stop failed in capture thread", e)
+                }
+                try {
+                    record.release()
+                } catch (e: Exception) {
+                    LogStore.logError(TAG, "AudioRecord release failed in capture thread", e)
+                }
+                audioRecord = null
+            }
+        }, "AudioCaptureThread").apply { start() }
+    }
+
+    private fun readFullChunk(record: AudioRecord, buffer: ByteArray): Int {
+        var totalRead = 0
+        while (totalRead < buffer.size && isAudioCapturing) {
+            val read = record.read(buffer, totalRead, buffer.size - totalRead)
+            if (read < 0) {
+                // Error code from AudioRecord.read (e.g. ERROR_INVALID_OPERATION).
+                return read
+            }
+            totalRead += read
+            if (read == 0) {
+                // No data available; yield briefly to avoid tight spinning.
+                Thread.sleep(1)
+            }
+        }
+        return totalRead
+    }
+
     companion object {
         private const val TAG = "StreamService"
 
@@ -641,6 +849,15 @@ class StreamService : Service() {
 
         private const val VIDEO_TRACK_ID = "screen_video"
         private const val AUDIO_TRACK_ID = "screen_audio"
+        private const val DATA_CHANNEL_LABEL = "audio-pcm"
+
+        private const val AUDIO_SAMPLE_RATE = 48000
+        private const val AUDIO_CHANNELS = 2
+        private const val AUDIO_BYTES_PER_SAMPLE = 2
+        private const val MS_PER_CHUNK = 10
+        private const val SAMPLES_PER_CHUNK = AUDIO_SAMPLE_RATE * MS_PER_CHUNK / 1000
+        private const val BYTES_PER_CHUNK = SAMPLES_PER_CHUNK * AUDIO_CHANNELS * AUDIO_BYTES_PER_SAMPLE
+        private const val TIMESTAMP_BYTES = 8
 
         const val EXTRA_VIDEO_WIDTH = "video_width"
         const val EXTRA_VIDEO_HEIGHT = "video_height"
