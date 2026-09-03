@@ -88,6 +88,20 @@
   </style>
 </head>
 <body>
+  <div id="audioOverlay" style="
+      position:fixed; top:0; left:0; width:100%; height:100%;
+      background:rgba(0,0,0,0.85); z-index:9999;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      color:#fff; font-family:system-ui; text-align:center;
+  ">
+      <div style="font-size:24px; margin-bottom:12px;">&#128263; Stream Audio Muted</div>
+      <div style="font-size:14px; opacity:0.7; margin-bottom:24px;">Browsers require a click to play audio</div>
+      <button id="enableAudioBtn" style="
+          padding:14px 32px; font-size:16px; border:none; border-radius:8px;
+          background:#ff0050; color:#fff; cursor:pointer;
+      ">Tap to Enable Audio</button>
+  </div>
+
   <div id="container">
     <div id="header">
       <div id="status"><span id="status-dot"></span><span id="status-text">Offline</span></div>
@@ -99,7 +113,7 @@
       </div>
     </div>
     <div id="video-wrap">
-      <video id="remoteVideo" autoplay playsinline muted></video>
+      <video id="remoteVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;"></video>
       <div id="latency">Latency: -- ms</div>
       <div id="controls">
         <button id="fitBtn">Fill</button>
@@ -143,8 +157,23 @@
     muteBtn.addEventListener('click', () => {
       video.muted = !video.muted;
       muteBtn.textContent = video.muted ? 'Unmute' : 'Mute';
-      video.play().catch((e) => console.error('unmute play failed', e));
     });
+
+    // Guarded manual play — only fires when the element is actually ready,
+    // avoiding AbortError from overlapping play() / load() requests.
+    function safePlay() {
+      if (video.paused && video.readyState >= 2) {
+        video.play().catch((e) => {
+          console.log('Video play delayed:', e.message);
+        });
+      }
+    }
+    video.addEventListener('loadedmetadata', safePlay);
+    video.addEventListener('canplay', safePlay);
+
+    // AudioContext is created only inside a user gesture (the overlay click),
+    // otherwise the browser blocks it with an autoplay policy error.
+    let audioCtx = null;
 
     // Anchor for timestamp-based scheduling: chunks are spaced by their capture
     // time on the phone, not by arrival time, so audio stays true to the source.
@@ -164,7 +193,27 @@
       firstPlayTime = null;
     });
 
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+    const audioOverlay = document.getElementById('audioOverlay');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+
+    enableAudioBtn.addEventListener('click', () => {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      audioOverlay.style.display = 'none';
+      console.log('Audio enabled by user gesture');
+    });
+
+    // Also allow clicking anywhere on the overlay.
+    audioOverlay.addEventListener('click', (e) => {
+      if (e.target === audioOverlay) {
+        enableAudioBtn.click();
+      }
+    });
+
     const SAMPLE_RATE = 48000;
     const CHANNELS = 2;
     const SAMPLES_PER_10MS = SAMPLE_RATE / 100;
@@ -173,9 +222,6 @@
     function setupAudioPlayback(dc) {
       dc.onopen = () => {
         console.log('audio-pcm data channel open');
-        if (audioCtx.state === 'suspended') {
-          audioCtx.resume().catch((err) => console.error('audio resume failed', err));
-        }
       };
       dc.onclose = () => {
         console.log('audio-pcm data channel closed');
@@ -189,6 +235,11 @@
       };
 
       dc.onmessage = (e) => {
+        // Audio not enabled yet (no user gesture) — silently drop chunks.
+        if (!audioCtx || audioCtx.state !== 'running') {
+          return;
+        }
+
         const buffer = e.data;
         if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 8 + BYTES_PER_CHUNK) {
           console.warn('audio-pcm received unexpected message', buffer);
@@ -299,15 +350,12 @@
 
       pc.ontrack = (event) => {
         console.log('ontrack', event.track?.kind, event.streams);
-        const stream = (event.streams && event.streams[0]) ? event.streams[0] : (event.track ? new MediaStream([event.track]) : null);
-        if (!stream) return;
-
-        video.muted = true;
-        video.srcObject = stream;
-        video.play().catch((e) => {
-          console.error('video.play() failed', e);
-          setStatus('offline', 'Tap video to play');
-        });
+        if (event.streams && event.streams[0]) {
+          // Set srcObject once; re-setting it would interrupt playback (AbortError).
+          if (video.srcObject !== event.streams[0]) {
+            video.srcObject = event.streams[0];
+          }
+        }
 
         event.track.onmute = () => console.log('track muted');
         event.track.onunmute = () => {
@@ -317,9 +365,7 @@
         };
       };
 
-      video.addEventListener('click', () => {
-        video.play().catch((e) => console.error('click play failed', e));
-      });
+      video.addEventListener('click', safePlay);
 
       pc.onconnectionstatechange = () => {
         console.log('PC state', pc.connectionState);
