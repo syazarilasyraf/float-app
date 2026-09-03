@@ -631,6 +631,21 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
           if (report.type === 'track' && report.kind === 'video') {
             console.log('stats track', report);
           }
+          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+            console.log('stats inbound audio', {
+              bytesReceived: report.bytesReceived,
+              packetsReceived: report.packetsReceived,
+              packetsLost: report.packetsLost,
+              jitter: report.jitter,
+            });
+          }
+          // Remote audio track level: non-zero only if the mic audio actually arrives.
+          if (report.type === 'track' && report.kind === 'audio') {
+            console.log('stats remote audio track', {
+              audioLevel: report.audioLevel,
+              totalAudioEnergy: report.totalAudioEnergy,
+            });
+          }
         });
       }, 3000);
     }

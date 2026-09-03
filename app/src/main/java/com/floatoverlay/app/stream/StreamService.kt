@@ -535,19 +535,28 @@ class StreamService : Service() {
         val pc = peerConnection ?: return
         try {
             pc.getStats { report ->
-                var bytesSent = 0L
-                var packetsSent = 0L
-                var outboundFound = false
+                var videoBytes = 0L
+                var videoPackets = 0L
+                var audioBytes = 0L
+                var audioPackets = 0L
+                var micLevel: Double? = null
                 for (stats in report.statsMap.values) {
                     if (stats.type == "outbound-rtp" && stats.members["kind"] == "video") {
-                        outboundFound = true
-                        bytesSent += (stats.members["bytesSent"] as? Number)?.toLong() ?: 0L
-                        packetsSent += (stats.members["packetsSent"] as? Number)?.toLong() ?: 0L
+                        videoBytes += (stats.members["bytesSent"] as? Number)?.toLong() ?: 0L
+                        videoPackets += (stats.members["packetsSent"] as? Number)?.toLong() ?: 0L
+                    }
+                    if (stats.type == "outbound-rtp" && stats.members["kind"] == "audio") {
+                        audioBytes += (stats.members["bytesSent"] as? Number)?.toLong() ?: 0L
+                        audioPackets += (stats.members["packetsSent"] as? Number)?.toLong() ?: 0L
+                    }
+                    // media-source audioLevel: 0..1, non-zero only when the mic actually hears sound.
+                    if (stats.type == "media-source" && stats.members["kind"] == "audio") {
+                        micLevel = (stats.members["audioLevel"] as? Number)?.toDouble()
                     }
                 }
-                if (outboundFound) {
-                    LogStore.log(TAG, "Outbound video bytesSent=$bytesSent packetsSent=$packetsSent")
-                }
+                val levelStr = micLevel?.let { String.format("%.3f", it) } ?: "n/a"
+                LogStore.log(TAG, "Outbound video bytesSent=$videoBytes packetsSent=$videoPackets")
+                LogStore.log(TAG, "Outbound audio bytesSent=$audioBytes packetsSent=$audioPackets micLevel=$levelStr")
             }
         } catch (e: Exception) {
             LogStore.logError(TAG, "Failed to get stats", e)
