@@ -14,7 +14,6 @@ import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -117,7 +116,7 @@ class StreamService : Service() {
                 if (data != null && resultCode == Activity.RESULT_OK) {
                     // Start foreground immediately to satisfy Android 12+ deadlines.
                     startForegroundWithNotification()
-                    startStreaming(resultCode, data, width, height, fps)
+                    startStreaming(data, width, height, fps)
                 } else {
                     LogStore.log(TAG, "Start stream requested without MediaProjection permission")
                     stopSelf()
@@ -165,7 +164,7 @@ class StreamService : Service() {
         }
     }
 
-    private fun startStreaming(resultCode: Int, data: Intent, targetWidth: Int, targetHeight: Int, targetFps: Int) {
+    private fun startStreaming(data: Intent, targetWidth: Int, targetHeight: Int, targetFps: Int) {
         if (capturer != null) {
             LogStore.log(TAG, "Stream already active")
             return
@@ -187,21 +186,12 @@ class StreamService : Service() {
         val (width, height) = computeLandscapeSize(metrics.widthPixels, metrics.heightPixels, targetWidth, targetHeight)
 
         try {
-            // Own the MediaProjection token for audio playback capture and lifecycle.
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = projectionManager.getMediaProjection(resultCode, data)?.apply {
-                registerCallback(object : MediaProjection.Callback() {
-                    override fun onStop() {
-                        LogStore.log(TAG, "MediaProjection stopped by system")
-                        stopStreaming()
-                    }
-                }, null)
-            }
-
             val source = peerConnectionFactory!!.createVideoSource(true)
             videoSource = source
 
-            // ScreenCapturerAndroid creates its own MediaProjection from the same consent data.
+            // ScreenCapturerAndroid creates and owns the MediaProjection from the consent data.
+            // Android only allows ONE MediaProjection per consent Intent, so we must never
+            // call MediaProjectionManager.getMediaProjection() ourselves here.
             capturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
                 override fun onStop() {
                     LogStore.log(TAG, "ScreenCapturer MediaProjection stopped by system")
@@ -211,6 +201,26 @@ class StreamService : Service() {
                 initialize(surfaceTextureHelper, applicationContext, source.capturerObserver)
                 startCapture(width, height, targetFps)
             }
+
+            // Reuse the MediaProjection owned by ScreenCapturerAndroid for audio playback
+            // capture and lifecycle. startCapture() must have run already for the field
+            // to be assigned.
+            val extractedProjection = try {
+                val field = ScreenCapturerAndroid::class.java.getDeclaredField("mediaProjection")
+                field.isAccessible = true
+                field.get(capturer) as? MediaProjection
+            } catch (e: Exception) {
+                LogStore.log(TAG, "Could not extract MediaProjection from ScreenCapturerAndroid, audio capture will be unavailable")
+                null
+            }
+            mediaProjection = extractedProjection
+
+            extractedProjection?.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    LogStore.log(TAG, "MediaProjection stopped by system")
+                    stopStreaming()
+                }
+            }, null)
 
             videoTrack = peerConnectionFactory?.createVideoTrack(VIDEO_TRACK_ID, source)
 
@@ -647,16 +657,16 @@ class StreamService : Service() {
                 audioRecord = null
             }
 
+            capturer?.stopCapture()
+            capturer?.dispose()
+            capturer = null
+
             try {
                 mediaProjection?.stop()
             } catch (e: Exception) {
                 LogStore.logError(TAG, "MediaProjection stop failed", e)
             }
             mediaProjection = null
-
-            capturer?.stopCapture()
-            capturer?.dispose()
-            capturer = null
 
             videoTrack?.dispose()
             videoTrack = null
