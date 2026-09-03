@@ -382,6 +382,23 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
 registerProcessor('pcm-player', PcmPlayerProcessor);
 `;
 
+    // Remote microphone track (real WebRTC audio), routed into the same
+    // AudioContext as the internal audio so both mix and the enable-audio
+    // gesture governs them.
+    let remoteAudioStream = null;
+    let remoteAudioSourceNode = null;
+
+    function connectRemoteAudio() {
+      if (!audioCtx || !remoteAudioStream || remoteAudioSourceNode) return;
+      try {
+        remoteAudioSourceNode = audioCtx.createMediaStreamSource(remoteAudioStream);
+        remoteAudioSourceNode.connect(audioCtx.destination);
+        console.log('remote microphone audio connected');
+      } catch (err) {
+        console.error('connect remote audio failed', err);
+      }
+    }
+
     // AudioContext is created only inside a user gesture (the overlay click),
     // otherwise the browser blocks it with an autoplay policy error.
     let audioCtx = null;
@@ -424,12 +441,13 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
           });
           audioWorkletNode.connect(audioCtx.destination);
           applyAudioTarget();
+          connectRemoteAudio();
         } catch (err) {
           console.error('AudioWorklet init failed', err);
         }
       }
       if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
+        audioCtx.resume().then(connectRemoteAudio);
       }
       audioOverlay.style.display = 'none';
       console.log('Audio enabled by user gesture');
@@ -563,6 +581,15 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
 
       pc.ontrack = (event) => {
         console.log('ontrack', event.track?.kind, event.streams);
+        if (event.track?.kind === 'audio') {
+          // Microphone from the sender — remember it and connect once audio
+          // is enabled (AudioContext needs the user gesture first).
+          remoteAudioStream = (event.streams && event.streams[0])
+            ? event.streams[0]
+            : new MediaStream([event.track]);
+          connectRemoteAudio();
+          return;
+        }
         if (event.track?.kind !== 'video') return;
         // The sender adds transceivers without a MediaStream, so event.streams is
         // empty — fall back to wrapping the track in our own MediaStream.

@@ -232,9 +232,9 @@ class StreamService : Service() {
                 }
                 audioSource = peerConnectionFactory?.createAudioSource(audioConstraints)
                 audioTrack = peerConnectionFactory?.createAudioTrack(AUDIO_TRACK_ID, audioSource)
-                // Disable the native mic track; internal audio is sent over the data channel.
-                audioTrack?.setEnabled(false)
-                LogStore.log(TAG, "Audio track created (microphone, disabled)")
+                // Microphone goes over the WebRTC audio track (Opus); internal game
+                // audio goes over the data channel. Both mix on the viewer.
+                LogStore.log(TAG, "Audio track created (microphone)")
             }
 
             // Start internal audio capture. Failure here is non-fatal: video keeps streaming.
