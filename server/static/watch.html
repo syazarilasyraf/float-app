@@ -350,11 +350,13 @@
 
       pc.ontrack = (event) => {
         console.log('ontrack', event.track?.kind, event.streams);
-        if (event.streams && event.streams[0]) {
-          // Set srcObject once; re-setting it would interrupt playback (AbortError).
-          if (video.srcObject !== event.streams[0]) {
-            video.srcObject = event.streams[0];
-          }
+        if (event.track?.kind !== 'video') return;
+        // The sender adds transceivers without a MediaStream, so event.streams is
+        // empty — fall back to wrapping the track in our own MediaStream.
+        const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+        // Set srcObject once; re-setting it would interrupt playback (AbortError).
+        if (video.srcObject !== stream) {
+          video.srcObject = stream;
         }
 
         event.track.onmute = () => console.log('track muted');
