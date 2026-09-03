@@ -81,6 +81,7 @@ class StreamService : Service() {
     private var audioCaptureThread: Thread? = null
     @Volatile
     private var isAudioCapturing = false
+    private var audioChunkSeq = 0
     private var isStopping = false
     private val statsHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
@@ -788,6 +789,7 @@ class StreamService : Service() {
 
     private fun startAudioCaptureThread(record: AudioRecord) {
         isAudioCapturing = true
+        audioChunkSeq = 0
         audioCaptureThread = Thread({
             try {
                 record.startRecording()
@@ -800,9 +802,11 @@ class StreamService : Service() {
                     }
 
                     val timestampNs = SystemClock.elapsedRealtimeNanos()
-                    val combined = ByteArray(TIMESTAMP_BYTES + BYTES_PER_CHUNK)
+                    val seq = audioChunkSeq++
+                    val combined = ByteArray(SEQ_BYTES + TIMESTAMP_BYTES + BYTES_PER_CHUNK)
                     ByteBuffer.wrap(combined)
                         .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                        .putInt(seq)
                         .putLong(timestampNs)
                         .put(chunkBytes)
 
@@ -869,6 +873,7 @@ class StreamService : Service() {
         private const val MS_PER_CHUNK = 10
         private const val SAMPLES_PER_CHUNK = AUDIO_SAMPLE_RATE * MS_PER_CHUNK / 1000
         private const val BYTES_PER_CHUNK = SAMPLES_PER_CHUNK * AUDIO_CHANNELS * AUDIO_BYTES_PER_SAMPLE
+        private const val SEQ_BYTES = 4
         private const val TIMESTAMP_BYTES = 8
 
         const val EXTRA_VIDEO_WIDTH = "video_width"

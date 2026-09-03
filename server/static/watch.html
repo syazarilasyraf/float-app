@@ -199,22 +199,24 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
     this.started = false;
     this.targetFrames = Math.round(sampleRate * 0.15);
     this.maxFrames = Math.round(sampleRate * 0.8);
-    this.expectedTs = null;
+    this.nextSeq = null;
     this.gapFrames = 0;
     this.fade = 0;
     this.prevL = 0;
     this.prevR = 0;
+    // Phone chunks are always 10ms of 48kHz audio; convert to this context's rate.
+    this.chunkFrames = Math.max(1, Math.round(480 * sampleRate / 48000));
     this.port.onmessage = (e) => {
       const m = e.data;
       if (m.type === 'push') {
-        this.insertChunk(m.ts, m.left, m.right);
+        this.insertChunk(m.seq, this.resample(m.left), this.resample(m.right));
       } else if (m.type === 'target') {
         this.setTarget(m.frames);
       } else if (m.type === 'reset') {
         this.queue = [];
         this.frames = 0;
         this.started = false;
-        this.expectedTs = null;
+        this.nextSeq = null;
         this.gapFrames = 0;
         this.fade = 0;
         this.prevL = 0;
@@ -223,30 +225,49 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
     };
   }
 
+  // Linear-interpolation resample of one 48kHz channel buffer to the
+  // AudioContext's actual rate — the {sampleRate: 48000} hint is not always
+  // honored, and playing 48kHz data at another rate causes constant
+  // buffer growth and pulsing drop-trims.
+  resample(src) {
+    const dstLen = this.chunkFrames;
+    if (src.length === dstLen) return src;
+    const out = new Float32Array(dstLen);
+    const step = src.length / dstLen;
+    for (let i = 0; i < dstLen; i++) {
+      const pos = i * step;
+      const i0 = Math.floor(pos);
+      const frac = pos - i0;
+      const i1 = Math.min(i0 + 1, src.length - 1);
+      out[i] = src[i0] + (src[i1] - src[i0]) * frac;
+    }
+    return out;
+  }
+
   setTarget(frames) {
     this.targetFrames = Math.max(Math.round(sampleRate * 0.03), frames);
     this.maxFrames = Math.max(this.targetFrames * 2, Math.round(sampleRate * 0.6));
     if (this.frames > this.maxFrames) this.trimOverflow();
   }
 
-  insertChunk(ts, left, right) {
-    // Keep the queue sorted by capture timestamp (binary-search insertion).
+  insertChunk(seq, left, right) {
+    // Keep the queue sorted by sequence number (channel is unordered).
     let lo = 0;
     let hi = this.queue.length;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (this.queue[mid].ts < ts) lo = mid + 1; else hi = mid;
+      if (this.queue[mid].seq < seq) lo = mid + 1; else hi = mid;
     }
     // Drop exact duplicates.
-    if (lo > 0 && this.queue[lo - 1].ts === ts) return;
-    if (lo < this.queue.length && this.queue[lo].ts === ts) return;
-    this.queue.splice(lo, 0, { ts, left, right });
+    if (lo > 0 && this.queue[lo - 1].seq === seq) return;
+    if (lo < this.queue.length && this.queue[lo].seq === seq) return;
+    this.queue.splice(lo, 0, { seq, left, right });
     this.frames += left.length;
     if (this.frames > this.maxFrames) this.trimOverflow();
   }
 
   trimOverflow() {
-    // Clock drift / latency control: drop oldest audio back down to target.
+    // Latency/drift control: drop oldest audio back down to target.
     let drop = this.frames - this.targetFrames;
     while (drop > 0 && this.queue.length > 0) {
       const c = this.queue[0];
@@ -261,7 +282,8 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
         drop = 0;
       }
     }
-    this.expectedTs = null;
+    // Skipped audio must not be mistaken for lost packets afterwards.
+    this.nextSeq = this.queue.length > 0 ? this.queue[0].seq : null;
   }
 
   process(inputs, outputs) {
@@ -283,11 +305,12 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
       }
       this.started = true;
       this.fade = 64; // fade in after silence so resuming doesn't click
+      this.nextSeq = this.queue.length > 0 ? this.queue[0].seq : null;
     }
 
     let i = 0;
     while (i < n) {
-      // Fill capture-time gaps with silence so timing matches the phone.
+      // Fill lost-packet gaps with silence so timing matches the phone.
       if (this.gapFrames > 0) {
         const m = Math.min(this.gapFrames, n - i);
         for (let k = 0; k < m; k++) { L[i + k] = 0; R[i + k] = 0; }
@@ -310,15 +333,21 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
         this.prevL = 0;
         this.prevR = 0;
         this.started = false;
-        this.expectedTs = null;
+        this.nextSeq = null;
         return true;
       }
 
-      // Timestamp jump ahead => a chunk was lost; schedule silence for the gap.
-      if (this.expectedTs !== null && c.ts > this.expectedTs + 6000000) {
-        const gapNs = c.ts - this.expectedTs;
-        this.gapFrames = Math.min(Math.round(gapNs * sampleRate / 1e9), sampleRate);
-        this.expectedTs = null;
+      // Sequence bookkeeping: discard stale chunks, silence missing ones.
+      if (this.nextSeq === null) {
+        this.nextSeq = c.seq;
+      } else if (c.seq < this.nextSeq) {
+        this.frames -= c.left.length;
+        this.queue.shift();
+        continue;
+      } else if (c.seq > this.nextSeq) {
+        const missing = c.seq - this.nextSeq;
+        this.gapFrames = Math.min(missing * this.chunkFrames, sampleRate);
+        this.nextSeq = c.seq;
         continue;
       }
 
@@ -340,8 +369,8 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
       i += m;
       this.frames -= m;
       if (m === c.left.length) {
-        this.expectedTs = c.ts + Math.round(c.left.length * 1e9 / 48000);
         this.queue.shift();
+        this.nextSeq = c.seq + 1;
       } else {
         c.left = c.left.subarray(m);
         c.right = c.right.subarray(m);
@@ -413,16 +442,20 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
       }
     });
 
+    let fallbackSeq = 0; // for old APKs that send no sequence number
+
     function setupAudioPlayback(dc) {
       dc.onopen = () => {
         console.log('audio-pcm data channel open');
       };
       dc.onclose = () => {
         console.log('audio-pcm data channel closed');
+        fallbackSeq = 0;
         audioWorkletNode?.port.postMessage({ type: 'reset' });
       };
       dc.onerror = (err) => {
         console.error('audio-pcm data channel error', err);
+        fallbackSeq = 0;
         audioWorkletNode?.port.postMessage({ type: 'reset' });
       };
 
@@ -439,8 +472,19 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
         }
 
         const view = new DataView(buffer);
-        const timestampNs = Number(view.getBigInt64(0, true));
-        const pcm16 = new Int16Array(buffer, 8, SAMPLES_PER_10MS * CHANNELS);
+        // New format: int32 seq + int64 timestamp + PCM.
+        // Old format: int64 timestamp + PCM (synthesize a local sequence).
+        let seq;
+        let pcmOffset;
+        if (buffer.byteLength >= 12 + BYTES_PER_CHUNK) {
+          seq = view.getInt32(0, true);
+          pcmOffset = 12;
+        } else {
+          seq = fallbackSeq++;
+          pcmOffset = 8;
+        }
+
+        const pcm16 = new Int16Array(buffer, pcmOffset, SAMPLES_PER_10MS * CHANNELS);
 
         const left = new Float32Array(SAMPLES_PER_10MS);
         const right = new Float32Array(SAMPLES_PER_10MS);
@@ -449,7 +493,7 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
           right[i] = pcm16[i * 2 + 1] / 32768.0;
         }
 
-        audioWorkletNode.port.postMessage({ type: 'push', ts: timestampNs, left, right });
+        audioWorkletNode.port.postMessage({ type: 'push', seq, left, right });
       };
     }
 
