@@ -89,6 +89,22 @@ class StreamRepository(context: Context) {
         prefs.edit().putBoolean(KEY_AUDIO_ENABLED, enabled).apply()
     }
 
+    fun getGameVolume(): Int {
+        return prefs.getInt(KEY_GAME_VOLUME, DEFAULT_VOLUME)
+    }
+
+    fun setGameVolume(volume: Int) {
+        prefs.edit().putInt(KEY_GAME_VOLUME, volume.coerceIn(0, 100)).apply()
+    }
+
+    fun getMicVolume(): Int {
+        return prefs.getInt(KEY_MIC_VOLUME, DEFAULT_VOLUME)
+    }
+
+    fun setMicVolume(volume: Int) {
+        prefs.edit().putInt(KEY_MIC_VOLUME, volume.coerceIn(0, 100)).apply()
+    }
+
     fun registerListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
         prefs.registerOnSharedPreferenceChangeListener(listener)
     }
@@ -108,6 +124,8 @@ class StreamRepository(context: Context) {
         const val KEY_VIDEO_HEIGHT = "video_height"
         const val KEY_VIDEO_FPS = "video_fps"
         const val KEY_AUDIO_ENABLED = "audio_enabled"
+        const val KEY_GAME_VOLUME = "game_volume"
+        const val KEY_MIC_VOLUME = "mic_volume"
 
         private const val DEFAULT_SERVER_URL = "http://192.168.1.100:3000"
 
@@ -115,6 +133,7 @@ class StreamRepository(context: Context) {
         const val DEFAULT_VIDEO_HEIGHT = 720
         const val DEFAULT_VIDEO_FPS = 30
         const val DEFAULT_AUDIO_ENABLED = false
+        private const val DEFAULT_VOLUME = 100
 
         val QUALITY_480P = Pair(854, 480)
         val QUALITY_720P = Pair(1280, 720)

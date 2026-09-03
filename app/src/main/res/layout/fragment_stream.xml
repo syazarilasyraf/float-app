@@ -150,9 +150,40 @@
                     android:text="Stream microphone audio" />
 
                 <TextView
+                    android:id="@+id/gameVolumeLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="System/game audio capture requires a future WebRTC audio module update; microphone audio is sent when enabled."
+                    android:layout_marginTop="8dp"
+                    android:text="Game audio volume: 100%"
+                    android:textSize="14sp" />
+
+                <SeekBar
+                    android:id="@+id/gameVolumeSeek"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:max="100"
+                    android:progress="100" />
+
+                <TextView
+                    android:id="@+id/micVolumeLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Microphone volume: 100%"
+                    android:textSize="14sp" />
+
+                <SeekBar
+                    android:id="@+id/micVolumeSeek"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:max="100"
+                    android:progress="100" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Volumes apply on the viewer and can be adjusted while streaming."
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12sp" />
             </LinearLayout>

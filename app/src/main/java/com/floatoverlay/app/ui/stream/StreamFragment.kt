@@ -13,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
@@ -49,6 +50,10 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
     private lateinit var qualitySpinner: Spinner
     private lateinit var fpsSpinner: Spinner
     private lateinit var audioSwitch: MaterialSwitch
+    private lateinit var gameVolumeSeek: SeekBar
+    private lateinit var micVolumeSeek: SeekBar
+    private lateinit var gameVolumeLabel: TextView
+    private lateinit var micVolumeLabel: TextView
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
     private lateinit var copyLinkButton: Button
@@ -118,6 +123,10 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
         qualitySpinner = view.findViewById(R.id.qualitySpinner)
         fpsSpinner = view.findViewById(R.id.fpsSpinner)
         audioSwitch = view.findViewById(R.id.audioSwitch)
+        gameVolumeSeek = view.findViewById(R.id.gameVolumeSeek)
+        micVolumeSeek = view.findViewById(R.id.micVolumeSeek)
+        gameVolumeLabel = view.findViewById(R.id.gameVolumeLabel)
+        micVolumeLabel = view.findViewById(R.id.micVolumeLabel)
         startButton = view.findViewById(R.id.startStreamButton)
         stopButton = view.findViewById(R.id.stopStreamButton)
         copyLinkButton = view.findViewById(R.id.copyLinkButton)
@@ -132,6 +141,7 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
         setupQualitySpinner()
         setupFpsSpinner()
         setupAudioSwitch()
+        setupVolumeControls()
 
         startButton.setOnClickListener {
             repository.setServerUrl(serverUrlInput.text.toString().trim())
@@ -206,6 +216,39 @@ class StreamFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeLis
         audioSwitch.isChecked = repository.isAudioEnabled()
         audioSwitch.setOnCheckedChangeListener { _, isChecked ->
             repository.setAudioEnabled(isChecked)
+        }
+    }
+
+    private fun setupVolumeControls() {
+        gameVolumeSeek.progress = repository.getGameVolume()
+        micVolumeSeek.progress = repository.getMicVolume()
+        gameVolumeLabel.text = "Game audio volume: ${gameVolumeSeek.progress}%"
+        micVolumeLabel.text = "Microphone volume: ${micVolumeSeek.progress}%"
+
+        gameVolumeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                gameVolumeLabel.text = "Game audio volume: $progress%"
+                repository.setGameVolume(progress)
+                pushVolumesToService()
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        micVolumeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                micVolumeLabel.text = "Microphone volume: $progress%"
+                repository.setMicVolume(progress)
+                pushVolumesToService()
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+    }
+
+    private fun pushVolumesToService() {
+        if (repository.isStreaming()) {
+            StreamService.setVolumes(requireContext(), gameVolumeSeek.progress, micVolumeSeek.progress)
         }
     }
 

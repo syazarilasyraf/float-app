@@ -80,6 +80,11 @@ class StreamService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
     private var audioDataChannel: DataChannel? = null
+    private var ctrlDataChannel: DataChannel? = null
+    @Volatile
+    private var gameVolume = 100
+    @Volatile
+    private var micVolume = 100
     private var audioCaptureThread: Thread? = null
     @Volatile
     private var isAudioCapturing = false
@@ -127,6 +132,11 @@ class StreamService : Service() {
             }
             ACTION_STOP -> {
                 stopStreaming()
+            }
+            ACTION_SET_VOLUME -> {
+                gameVolume = intent.getIntExtra(EXTRA_GAME_VOLUME, gameVolume).coerceIn(0, 100)
+                micVolume = intent.getIntExtra(EXTRA_MIC_VOLUME, micVolume).coerceIn(0, 100)
+                sendVolumesToViewer()
             }
         }
         return START_NOT_STICKY
@@ -184,6 +194,9 @@ class StreamService : Service() {
         val defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
         @Suppress("DEPRECATION")
         defaultDisplay.getRealMetrics(metrics)
+
+        gameVolume = streamRepository.getGameVolume()
+        micVolume = streamRepository.getMicVolume()
 
         // Scale the phone's current landscape size to fit within the selected target resolution.
         val (width, height) = computeLandscapeSize(metrics.widthPixels, metrics.heightPixels, targetWidth, targetHeight)
@@ -364,6 +377,24 @@ class StreamService : Service() {
                     override fun onMessage(buffer: DataChannel.Buffer) {}
                 })
                 LogStore.log(TAG, "Audio data channel created")
+
+                // Reliable control channel for viewer settings (volumes, etc.).
+                val ctrlInit = DataChannel.Init().apply {
+                    ordered = true
+                    maxRetransmits = -1
+                }
+                ctrlDataChannel = createDataChannel(CTRL_CHANNEL_LABEL, ctrlInit)
+                ctrlDataChannel?.registerObserver(object : DataChannel.Observer {
+                    override fun onBufferedAmountChange(previousAmount: Long) {}
+                    override fun onStateChange() {
+                        LogStore.log(TAG, "Control channel state: ${ctrlDataChannel?.state()}")
+                        if (ctrlDataChannel?.state() == DataChannel.State.OPEN) {
+                            sendVolumesToViewer()
+                        }
+                    }
+                    override fun onMessage(buffer: DataChannel.Buffer) {}
+                })
+                LogStore.log(TAG, "Control channel created")
             }
 
             signalingClient = SignalingClient(
@@ -669,6 +700,13 @@ class StreamService : Service() {
             }
             audioDataChannel = null
 
+            try {
+                ctrlDataChannel?.close()
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Failed to close control channel", e)
+            }
+            ctrlDataChannel = null
+
             // Release the record if the capture thread has not already done so.
             val record = audioRecord
             if (record != null) {
@@ -735,6 +773,18 @@ class StreamService : Service() {
     override fun onDestroy() {
         stopStreaming()
         super.onDestroy()
+    }
+
+    private fun sendVolumesToViewer() {
+        val dc = ctrlDataChannel ?: return
+        if (dc.state() != DataChannel.State.OPEN) return
+        try {
+            val json = "{\"type\":\"volume\",\"game\":$gameVolume,\"mic\":$micVolume}"
+            dc.send(DataChannel.Buffer(ByteBuffer.wrap(json.toByteArray(Charsets.UTF_8)), false))
+            LogStore.log(TAG, "Sent volumes to viewer: game=$gameVolume mic=$micVolume")
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Failed to send volumes", e)
+        }
     }
 
     private fun runOnMainThread(block: () -> Unit) {
@@ -876,9 +926,12 @@ class StreamService : Service() {
 
         private const val ACTION_START = "com.floatoverlay.app.stream.START"
         private const val ACTION_STOP = "com.floatoverlay.app.stream.STOP"
+        private const val ACTION_SET_VOLUME = "com.floatoverlay.app.stream.SET_VOLUME"
 
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "data"
+        private const val EXTRA_GAME_VOLUME = "game_volume"
+        private const val EXTRA_MIC_VOLUME = "mic_volume"
 
         private const val CHANNEL_ID = "float_stream_channel"
         private const val FOREGROUND_SERVICE_ID = 2
@@ -886,6 +939,7 @@ class StreamService : Service() {
         private const val VIDEO_TRACK_ID = "screen_video"
         private const val AUDIO_TRACK_ID = "screen_audio"
         private const val DATA_CHANNEL_LABEL = "audio-pcm"
+        private const val CTRL_CHANNEL_LABEL = "ctrl"
 
         private const val AUDIO_SAMPLE_RATE = 48000
         private const val AUDIO_CHANNELS = 2
@@ -921,6 +975,19 @@ class StreamService : Service() {
             }
             // Use startService, not startForegroundService, because we are stopping.
             // startForegroundService would require another startForeground() call.
+            context.startService(intent)
+        }
+
+        /**
+         * Push the current game/mic volumes to a running stream. The service
+         * forwards them to the viewer over the control data channel.
+         */
+        fun setVolumes(context: Context, gameVolume: Int, micVolume: Int) {
+            val intent = Intent(context, StreamService::class.java).apply {
+                action = ACTION_SET_VOLUME
+                putExtra(EXTRA_GAME_VOLUME, gameVolume)
+                putExtra(EXTRA_MIC_VOLUME, micVolume)
+            }
             context.startService(intent)
         }
     }

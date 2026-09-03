@@ -206,6 +206,7 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
     this.nextSeq = null;
     this.gapFrames = 0;
     this.fade = 0;
+    this.gain = 1;
     this.prevL = 0;
     this.prevR = 0;
     // Phone chunks are always 10ms of 48kHz audio; convert to this context's rate.
@@ -216,6 +217,8 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
         this.insertChunk(m.seq, this.resample(m.left), this.resample(m.right));
       } else if (m.type === 'target') {
         this.setTarget(m.frames);
+      } else if (m.type === 'gain') {
+        this.gain = m.value;
       } else if (m.type === 'reset') {
         this.queue = [];
         this.frames = 0;
@@ -357,8 +360,8 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
 
       const m = Math.min(n - i, c.left.length);
       for (let k = 0; k < m; k++) {
-        let vL = c.left[k];
-        let vR = c.right[k];
+        let vL = c.left[k] * this.gain;
+        let vR = c.right[k] * this.gain;
         if (this.fade > 0) {
           const g = 1 - this.fade / 64;
           vL *= g;
@@ -463,6 +466,28 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
       }
     });
 
+    function setupControlChannel(dc) {
+      dc.onopen = () => {
+        console.log('ctrl channel open');
+      };
+      dc.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'volume') {
+            const gameGain = Math.min(1, Math.max(0, (msg.game ?? 100) / 100));
+            const micVol = Math.min(1, Math.max(0, (msg.mic ?? 100) / 100));
+            remoteAudioEl.volume = micVol;
+            audioWorkletNode?.port.postMessage({ type: 'gain', value: gameGain });
+            console.log('volume update from streamer', { game: gameGain, mic: micVol });
+          }
+        } catch (err) {
+          console.error('ctrl message parse error', err);
+        }
+      };
+      dc.onclose = () => console.log('ctrl channel closed');
+      dc.onerror = (err) => console.error('ctrl channel error', err);
+    }
+
     let fallbackSeq = 0; // for old APKs that send no sequence number
 
     function setupAudioPlayback(dc) {
@@ -545,6 +570,8 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
         const dc = event.channel;
         if (dc.label === 'audio-pcm') {
           setupAudioPlayback(dc);
+        } else if (dc.label === 'ctrl') {
+          setupControlChannel(dc);
         }
       };
 
