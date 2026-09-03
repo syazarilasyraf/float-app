@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -22,6 +23,7 @@ import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.Display
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.floatoverlay.app.LogStore
 import com.floatoverlay.app.MainActivity
@@ -596,7 +598,18 @@ class StreamService : Service() {
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.stream_action_stop), stopPendingIntent)
             .build()
 
-        startForeground(FOREGROUND_SERVICE_ID, notification)
+        // Android 14+ blocks microphone access during screen capture unless the
+        // foreground service also carries the microphone type. Only attach it
+        // when audio is on (RECORD_AUDIO is granted in that flow); otherwise the
+        // mic type would demand a permission we don't have.
+        val foregroundTypes = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && streamRepository.isAudioEnabled() ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            else -> 0
+        }
+        ServiceCompat.startForeground(this, FOREGROUND_SERVICE_ID, notification, foregroundTypes)
     }
 
     private fun createNotificationChannel() {
