@@ -349,8 +349,10 @@ class StreamService : Service() {
                 }
 
                 val dcInit = DataChannel.Init().apply {
-                    ordered = true
-                    maxRetransmits = -1
+                    // Fire-and-forget: dropped audio chunks are inaudible, but a stalled
+                    // retransmission queue produces very audible delay.
+                    ordered = false
+                    maxRetransmits = 0
                 }
                 audioDataChannel = createDataChannel(DATA_CHANNEL_LABEL, dcInit)
                 audioDataChannel?.registerObserver(object : DataChannel.Observer {

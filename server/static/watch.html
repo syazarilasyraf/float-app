@@ -91,7 +91,12 @@
   <div id="container">
     <div id="header">
       <div id="status"><span id="status-dot"></span><span id="status-text">Offline</span></div>
-      <div style="font-size:12px;color:#888;">ZOMSTREAM</div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;">
+        <label for="syncSlider">Audio sync</label>
+        <input type="range" id="syncSlider" min="-500" max="500" step="10" value="0" style="width:100px;">
+        <span id="syncValue">0ms</span>
+        <span style="margin-left:8px;">ZOMSTREAM</span>
+      </div>
     </div>
     <div id="video-wrap">
       <video id="remoteVideo" autoplay playsinline muted></video>
@@ -141,39 +146,46 @@
       video.play().catch((e) => console.error('unmute play failed', e));
     });
 
+    // Anchor for timestamp-based scheduling: chunks are spaced by their capture
+    // time on the phone, not by arrival time, so audio stays true to the source.
+    let firstCaptureTime = null;
+    let firstPlayTime = null;
+
+    let syncOffsetMs = 0; // user-adjustable A/V sync offset
+
+    const syncSlider = document.getElementById('syncSlider');
+    const syncValue = document.getElementById('syncValue');
+
+    syncSlider.addEventListener('input', () => {
+      syncOffsetMs = parseInt(syncSlider.value, 10);
+      syncValue.textContent = `${syncOffsetMs}ms`;
+      // Reset the anchor so the next chunk recalculates firstPlayTime with the new offset.
+      firstCaptureTime = null;
+      firstPlayTime = null;
+    });
+
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
     const SAMPLE_RATE = 48000;
     const CHANNELS = 2;
     const SAMPLES_PER_10MS = SAMPLE_RATE / 100;
     const BYTES_PER_CHUNK = SAMPLES_PER_10MS * CHANNELS * 2;
-    const JITTER_CHUNKS = 10;
-
-    let audioQueue = [];
-    let isPlaying = false;
-    let nextScheduleTime = 0;
-    let scheduleTimer = null;
 
     function setupAudioPlayback(dc) {
       dc.onopen = () => {
         console.log('audio-pcm data channel open');
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch((err) => console.error('audio resume failed', err));
+        }
       };
       dc.onclose = () => {
         console.log('audio-pcm data channel closed');
-        isPlaying = false;
-        audioQueue = [];
-        if (scheduleTimer) {
-          clearTimeout(scheduleTimer);
-          scheduleTimer = null;
-        }
+        firstCaptureTime = null;
+        firstPlayTime = null;
       };
       dc.onerror = (err) => {
         console.error('audio-pcm data channel error', err);
-        isPlaying = false;
-        audioQueue = [];
-        if (scheduleTimer) {
-          clearTimeout(scheduleTimer);
-          scheduleTimer = null;
-        }
+        firstCaptureTime = null;
+        firstPlayTime = null;
       };
 
       dc.onmessage = (e) => {
@@ -185,7 +197,7 @@
 
         const view = new DataView(buffer);
         const timestampNs = view.getBigInt64(0, true);
-        const pcmBytes = new Uint8Array(buffer, 8, BYTES_PER_CHUNK);
+        const pcmBytes = new Uint8Array(buffer, 8);
 
         const pcm16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength / 2);
         const float32 = new Float32Array(pcm16.length);
@@ -193,45 +205,32 @@
           float32[i] = pcm16[i] / 32768.0;
         }
 
-        audioQueue.push({ timestampNs, float32 });
-
-        if (!isPlaying && audioQueue.length >= JITTER_CHUNKS) {
-          // Resume AudioContext if it was suspended by the browser's autoplay policy.
-          if (audioCtx.state === 'suspended') {
-            audioCtx.resume().catch((err) => console.error('audio resume failed', err));
-          }
-          isPlaying = true;
-          nextScheduleTime = audioCtx.currentTime + 0.05;
-          schedulePlayback();
+        if (firstCaptureTime === null) {
+          firstCaptureTime = Number(timestampNs);
+          firstPlayTime = audioCtx.currentTime + 0.03 + (syncOffsetMs / 1000); // 30ms initial buffer
         }
-      };
-    }
 
-    function schedulePlayback() {
-      if (!isPlaying) return;
+        const relativeSec = (Number(timestampNs) - firstCaptureTime) / 1e9;
+        const playTime = firstPlayTime + relativeSec;
 
-      while (audioQueue.length > 0 && nextScheduleTime < audioCtx.currentTime + 0.2) {
-        const chunk = audioQueue.shift();
+        // Drop chunks that are already in the past (they would glitch on start).
+        if (playTime < audioCtx.currentTime) {
+          return;
+        }
+
         const audioBuffer = audioCtx.createBuffer(CHANNELS, SAMPLES_PER_10MS, SAMPLE_RATE);
-
         const left = audioBuffer.getChannelData(0);
         const right = audioBuffer.getChannelData(1);
         for (let i = 0; i < SAMPLES_PER_10MS; i++) {
-          left[i] = chunk.float32[i * 2];
-          right[i] = chunk.float32[i * 2 + 1];
+          left[i] = float32[i * 2];
+          right[i] = float32[i * 2 + 1];
         }
 
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioCtx.destination);
-        source.start(nextScheduleTime);
-
-        nextScheduleTime += SAMPLES_PER_10MS / SAMPLE_RATE;
-      }
-
-      if (isPlaying) {
-        scheduleTimer = setTimeout(schedulePlayback, 10);
-      }
+        source.start(playTime);
+      };
     }
 
     async function connect() {
