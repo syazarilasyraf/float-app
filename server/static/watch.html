@@ -114,6 +114,9 @@
     </div>
     <div id="video-wrap">
       <video id="remoteVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;"></video>
+      <!-- Microphone from the sender: a real WebRTC audio track, played through a
+           plain audio element (battle-tested path for remote tracks). -->
+      <audio id="remoteAudio" autoplay playsinline style="position:absolute;width:2px;height:2px;opacity:0.01;pointer-events:none;"></audio>
       <div id="latency">Latency: -- ms</div>
       <div id="controls">
         <button id="fitBtn">Fill</button>
@@ -156,6 +159,7 @@
 
     muteBtn.addEventListener('click', () => {
       video.muted = !video.muted;
+      remoteAudioEl.muted = video.muted;
       muteBtn.textContent = video.muted ? 'Unmute' : 'Mute';
     });
 
@@ -382,21 +386,19 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
 registerProcessor('pcm-player', PcmPlayerProcessor);
 `;
 
-    // Remote microphone track (real WebRTC audio), routed into the same
-    // AudioContext as the internal audio so both mix and the enable-audio
-    // gesture governs them.
-    let remoteAudioStream = null;
-    let remoteAudioSourceNode = null;
+    // Remote microphone track (real WebRTC audio), played through a plain
+    // <audio> element — the most reliable path for remote tracks, kept out of
+    // the AudioContext that handles the internal game audio.
+    const remoteAudioEl = document.getElementById('remoteAudio');
 
-    function connectRemoteAudio() {
-      if (!audioCtx || !remoteAudioStream || remoteAudioSourceNode) return;
-      try {
-        remoteAudioSourceNode = audioCtx.createMediaStreamSource(remoteAudioStream);
-        remoteAudioSourceNode.connect(audioCtx.destination);
-        console.log('remote microphone audio connected');
-      } catch (err) {
-        console.error('connect remote audio failed', err);
+    function attachRemoteAudio(track, stream) {
+      const s = stream || new MediaStream([track]);
+      if (remoteAudioEl.srcObject !== s) {
+        remoteAudioEl.srcObject = s;
       }
+      // If the user already enabled audio, make sure playback is running.
+      remoteAudioEl.play().catch((e) => console.log('remote audio play delayed:', e.message));
+      console.log('remote microphone audio attached');
     }
 
     // AudioContext is created only inside a user gesture (the overlay click),
@@ -441,13 +443,14 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
           });
           audioWorkletNode.connect(audioCtx.destination);
           applyAudioTarget();
-          connectRemoteAudio();
+          // Start the remote microphone audio now that playback is allowed.
+          remoteAudioEl.play().catch((e) => console.log('remote audio play delayed:', e.message));
         } catch (err) {
           console.error('AudioWorklet init failed', err);
         }
       }
       if (audioCtx.state === 'suspended') {
-        audioCtx.resume().then(connectRemoteAudio);
+        audioCtx.resume();
       }
       audioOverlay.style.display = 'none';
       console.log('Audio enabled by user gesture');
@@ -582,12 +585,9 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
       pc.ontrack = (event) => {
         console.log('ontrack', event.track?.kind, event.streams);
         if (event.track?.kind === 'audio') {
-          // Microphone from the sender — remember it and connect once audio
-          // is enabled (AudioContext needs the user gesture first).
-          remoteAudioStream = (event.streams && event.streams[0])
-            ? event.streams[0]
-            : new MediaStream([event.track]);
-          connectRemoteAudio();
+          // Microphone from the sender — attach now; playback starts on the
+          // enable-audio gesture (or immediately if already enabled).
+          attachRemoteAudio(event.track, event.streams && event.streams[0]);
           return;
         }
         if (event.track?.kind !== 'video') return;

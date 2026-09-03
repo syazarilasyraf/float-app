@@ -228,14 +228,12 @@ class StreamService : Service() {
             videoTrack = peerConnectionFactory?.createVideoTrack(VIDEO_TRACK_ID, source)
 
             if (streamRepository.isAudioEnabled()) {
-                val audioConstraints = MediaConstraints().apply {
-                    optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-                    optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-                }
-                audioSource = peerConnectionFactory?.createAudioSource(audioConstraints)
+                // No AEC/NS constraints: this is a one-way stream with no local
+                // render path, so there is no echo reference for the processing
+                // modules — run the mic flat from the ADM capture.
+                audioSource = peerConnectionFactory?.createAudioSource(MediaConstraints())
                 audioTrack = peerConnectionFactory?.createAudioTrack(AUDIO_TRACK_ID, audioSource)
-                // Microphone goes over the WebRTC audio track (Opus); internal game
-                // audio goes over the data channel. Both mix on the viewer.
+                audioTrack?.setEnabled(true)
                 LogStore.log(TAG, "Audio track created (microphone)")
             }
 
@@ -493,10 +491,10 @@ class StreamService : Service() {
     }
 
     private fun createOffer() {
-        val constraints = MediaConstraints().apply {
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
-        }
+        // No OfferToReceive* constraints: with Unified Plan the SEND_ONLY
+        // transceivers define the m-line directions, and the deprecated
+        // constraints can demote the audio m-line in some libwebrtc builds.
+        val constraints = MediaConstraints()
         peerConnection?.createOffer(object : org.webrtc.SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription) {
                 LogStore.log(TAG, "Offer created")
