@@ -266,8 +266,13 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
 
   process(inputs, outputs) {
     const out = outputs[0];
-    const L = out[0];
-    const R = out[1];
+    const L = out && out[0];
+    const R = out && out[1];
+    // Some browsers hand a zero-channel output buffer when the node is not
+    // fully configured — bail out instead of crashing the worklet.
+    if (!L || !R) {
+      return true;
+    }
     const n = L.length;
 
     if (!this.started) {
@@ -383,7 +388,11 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
           const workletUrl = URL.createObjectURL(new Blob([AUDIO_WORKLET_CODE], { type: 'application/javascript' }));
           await audioCtx.audioWorklet.addModule(workletUrl);
           URL.revokeObjectURL(workletUrl);
-          audioWorkletNode = new AudioWorkletNode(audioCtx, 'pcm-player');
+          audioWorkletNode = new AudioWorkletNode(audioCtx, 'pcm-player', {
+            numberOfInputs: 0,
+            numberOfOutputs: 1,
+            outputChannelCount: [2],
+          });
           audioWorkletNode.connect(audioCtx.destination);
           applyAudioTarget();
         } catch (err) {
