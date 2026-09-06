@@ -270,10 +270,30 @@ class StreamService : Service() {
             streamRepository.setStreaming(true)
             LogStore.log(TAG, "Screen capture started ${width}x${height} @ ${targetFps}fps")
 
+            logNetworkInterfaces()
             createStreamAndConnect()
         } catch (e: Exception) {
             LogStore.logError(TAG, "Failed to start screen capture", e)
             stopStreaming()
+        }
+    }
+
+    private fun logNetworkInterfaces() {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                if (iface.isUp && !iface.isLoopback) {
+                    val addrs = iface.inetAddresses
+                    while (addrs.hasMoreElements()) {
+                        val addr = addrs.nextElement()
+                        val host = addr.hostAddress
+                        LogStore.log(TAG, "Network interface: ${iface.name} -> $host")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Failed to log network interfaces", e)
         }
     }
 
@@ -502,6 +522,7 @@ class StreamService : Service() {
         override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {}
         override fun onIceCandidate(candidate: IceCandidate?) {
             candidate?.let {
+                LogStore.log(TAG, "Local ICE candidate: ${it.sdpMid} ${it.sdpMLineIndex} ${it.sdp}")
                 signalingClient?.sendIceCandidate(it.sdpMid, it.sdpMLineIndex, it.sdp)
             }
         }
@@ -515,7 +536,10 @@ class StreamService : Service() {
         override fun onRemoveTrack(receiver: org.webrtc.RtpReceiver?) {}
         override fun onSelectedCandidatePairChanged(event: org.webrtc.CandidatePairChangeEvent?) {}
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
-            LogStore.log(TAG, "Peer connection state: $newState")
+            LogStore.log(TAG, "PeerConnection state: $newState")
+            if (newState == PeerConnection.PeerConnectionState.FAILED) {
+                LogStore.log(TAG, "Connection FAILED — ICE candidates may not include VPN interface")
+            }
         }
         override fun onStandardizedIceConnectionChange(newState: PeerConnection.IceConnectionState?) {}
         override fun onTrack(transceiver: org.webrtc.RtpTransceiver?) {}

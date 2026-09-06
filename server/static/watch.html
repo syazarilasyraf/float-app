@@ -605,8 +605,13 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log('Browser ICE candidate:', event.candidate.candidate);
           ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
         }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('Browser ICE connection state:', pc.iceConnectionState);
       };
 
       pc.ontrack = (event) => {
@@ -637,7 +642,7 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
       video.addEventListener('click', safePlay);
 
       pc.onconnectionstatechange = () => {
-        console.log('PC state', pc.connectionState);
+        console.log('Browser connection state:', pc.connectionState);
         if (pc.connectionState === 'connected') {
           setStatus('connected', 'Connected');
           setTimeout(() => setStatus('live', 'LIVE'), 1000);
