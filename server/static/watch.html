@@ -121,7 +121,16 @@
       <div id="controls">
         <button id="fitBtn">Fill</button>
         <button id="muteBtn">Unmute</button>
+        <button id="chatBtn">Chat</button>
         <button id="fullscreenBtn">Fullscreen</button>
+      </div>
+      <div id="chatPanel" style="display:none; position:absolute; left:12px; bottom:56px; width:min(320px, 70vw); background:rgba(10,10,14,0.92); border:1px solid #333; border-radius:12px; padding:10px; color:#eee; font-family:system-ui;">
+        <div style="font-size:12px; opacity:0.7; margin-bottom:6px;">Chat with streamer</div>
+        <div id="chatMessages" style="max-height:180px; overflow-y:auto; font-size:14px; margin-bottom:8px;"></div>
+        <div style="display:flex; gap:6px;">
+          <input id="chatInput" type="text" placeholder="Message..." maxlength="200" style="flex:1; padding:6px 8px; border-radius:8px; border:1px solid #444; background:#1a1a1f; color:#fff; font-size:14px;">
+          <button id="chatSend" style="padding:6px 12px; border:none; border-radius:8px; background:#ff0050; color:#fff; cursor:pointer;">Send</button>
+        </div>
       </div>
     </div>
   </div>
@@ -134,6 +143,37 @@
     const fullscreenBtn = document.getElementById('fullscreenBtn');
     const fitBtn = document.getElementById('fitBtn');
     const muteBtn = document.getElementById('muteBtn');
+    const chatBtn = document.getElementById('chatBtn');
+    const chatPanel = document.getElementById('chatPanel');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const chatSend = document.getElementById('chatSend');
+    let chatDc = null;
+
+    function appendChatLine(who, text) {
+      const div = document.createElement('div');
+      div.textContent = who + ': ' + text;
+      chatMessages.appendChild(div);
+      while (chatMessages.children.length > 50) chatMessages.removeChild(chatMessages.firstChild);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function sendChat() {
+      const text = chatInput.value.trim();
+      if (!text) return;
+      if (chatDc && chatDc.readyState === 'open') {
+        chatDc.send(JSON.stringify({ type: 'chat', text: text }));
+        appendChatLine('You', text);
+        chatInput.value = '';
+      } else {
+        appendChatLine('System', 'Chat not connected yet');
+      }
+    }
+    chatSend.addEventListener('click', sendChat);
+    chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+    chatBtn.addEventListener('click', () => {
+      chatPanel.style.display = chatPanel.style.display === 'none' ? 'block' : 'none';
+    });
 
     let fitMode = 'contain';
     fitBtn.textContent = 'Fill';
@@ -152,8 +192,12 @@
     fullscreenBtn.addEventListener('click', () => {
       if (document.fullscreenElement) {
         document.exitFullscreen();
-      } else {
-        document.documentElement.requestFullscreen();
+      } else if (video.webkitEnterFullscreen) {
+        // iPhone Safari: no standard Fullscreen API for arbitrary elements,
+        // but video elements support this native fullscreen.
+        video.webkitEnterFullscreen();
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
       }
     });
 
@@ -572,6 +616,8 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
           setupAudioPlayback(dc);
         } else if (dc.label === 'ctrl') {
           setupControlChannel(dc);
+        } else if (dc.label === 'chat') {
+          chatDc = dc;
         }
       };
 

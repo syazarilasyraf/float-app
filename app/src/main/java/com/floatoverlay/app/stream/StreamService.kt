@@ -20,6 +20,15 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.graphics.PixelFormat
+import android.provider.Settings
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.widget.SeekBar
+import android.widget.TextView
 import android.util.DisplayMetrics
 import android.view.Display
 import androidx.core.app.NotificationCompat
@@ -81,6 +90,7 @@ class StreamService : Service() {
     private var audioRecord: AudioRecord? = null
     private var audioDataChannel: DataChannel? = null
     private var ctrlDataChannel: DataChannel? = null
+    private var chatDataChannel: DataChannel? = null
     @Volatile
     private var gameVolume = 100
     @Volatile
@@ -90,6 +100,8 @@ class StreamService : Service() {
     private var isAudioCapturing = false
     private var audioChunkSeq = 0
     private var isStopping = false
+    private var overlayView: View? = null
+    private var overlayChatText: TextView? = null
     private val statsHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
         override fun run() {
@@ -253,6 +265,10 @@ class StreamService : Service() {
             // Start internal audio capture. Failure here is non-fatal: video keeps streaming.
             startInternalAudioCapture()
 
+            // Floating chat/volume overlay so the streamer can read viewer chat and
+            // adjust volumes without leaving the game.
+            setupStreamOverlay()
+
             videoTrack?.addSink(object : VideoSink {
                 private var frameCount = 0
                 private var lastLog = System.currentTimeMillis()
@@ -415,6 +431,28 @@ class StreamService : Service() {
                     override fun onMessage(buffer: DataChannel.Buffer) {}
                 })
                 LogStore.log(TAG, "Control channel created")
+
+                // Reliable chat channel: viewer -> streamer text messages.
+                chatDataChannel = createDataChannel(CHAT_CHANNEL_LABEL, ctrlInit)
+                chatDataChannel?.registerObserver(object : DataChannel.Observer {
+                    override fun onBufferedAmountChange(previousAmount: Long) {}
+                    override fun onStateChange() {
+                        LogStore.log(TAG, "Chat channel state: ${chatDataChannel?.state()}")
+                    }
+                    override fun onMessage(buffer: DataChannel.Buffer) {
+                        try {
+                            val bytes = ByteArray(buffer.data.remaining())
+                            buffer.data.get(bytes)
+                            val json = JSONObject(String(bytes, Charsets.UTF_8))
+                            if (json.optString("type") == "chat") {
+                                onViewerChat(json.optString("text"))
+                            }
+                        } catch (e: Exception) {
+                            LogStore.logError(TAG, "Failed to parse chat message", e)
+                        }
+                    }
+                })
+                LogStore.log(TAG, "Chat channel created")
             }
 
             signalingClient = SignalingClient(
@@ -691,6 +729,7 @@ class StreamService : Service() {
             isStopping = true
         }
         LogStore.log(TAG, "Stopping stream")
+        removeStreamOverlay()
         statsHandler.removeCallbacks(statsRunnable)
         try {
             httpClient.dispatcher.cancelAll()
@@ -730,6 +769,13 @@ class StreamService : Service() {
                 LogStore.logError(TAG, "Failed to close control channel", e)
             }
             ctrlDataChannel = null
+
+            try {
+                chatDataChannel?.close()
+            } catch (e: Exception) {
+                LogStore.logError(TAG, "Failed to close chat channel", e)
+            }
+            chatDataChannel = null
 
             // Release the record if the capture thread has not already done so.
             val record = audioRecord
@@ -797,6 +843,138 @@ class StreamService : Service() {
     override fun onDestroy() {
         stopStreaming()
         super.onDestroy()
+    }
+
+    private fun setupStreamOverlay() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            LogStore.log(TAG, "Overlay permission not granted, chat overlay disabled")
+            return
+        }
+        try {
+            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val view = LayoutInflater.from(this).inflate(R.layout.overlay_stream_chat, null)
+            val bubble = view.findViewById<TextView>(R.id.overlayBubble)
+            val panel = view.findViewById<View>(R.id.overlayPanel)
+            val minimize = view.findViewById<TextView>(R.id.overlayMinimize)
+            overlayChatText = view.findViewById(R.id.overlayChatText)
+            val gameSeek = view.findViewById<SeekBar>(R.id.overlayGameVolume)
+            val micSeek = view.findViewById<SeekBar>(R.id.overlayMicVolume)
+
+            gameSeek.progress = gameVolume
+            micSeek.progress = micVolume
+
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.END
+                x = 16
+                y = 200
+            }
+
+            // Tap toggles the panel; drag moves the bubble.
+            var downX = 0f
+            var downY = 0f
+            var startX = 0
+            var startY = 0
+            var dragging = false
+            bubble.setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.rawX
+                        downY = event.rawY
+                        startX = params.x
+                        startY = params.y
+                        dragging = false
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = (event.rawX - downX).toInt()
+                        val dy = (event.rawY - downY).toInt()
+                        if (!dragging && (Math.abs(dx) > 12 || Math.abs(dy) > 12)) dragging = true
+                        if (dragging) {
+                            // END gravity: positive x moves left, so subtract the delta.
+                            params.x = startX - dx
+                            params.y = startY + dy
+                            wm.updateViewLayout(view, params)
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!dragging) {
+                            bubble.visibility = View.GONE
+                            panel.visibility = View.VISIBLE
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+
+            minimize.setOnClickListener {
+                panel.visibility = View.GONE
+                bubble.visibility = View.VISIBLE
+            }
+
+            gameSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    gameVolume = progress
+                    streamRepository.setGameVolume(progress)
+                    sendVolumesToViewer()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+            micSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    micVolume = progress
+                    streamRepository.setMicVolume(progress)
+                    sendVolumesToViewer()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+
+            wm.addView(view, params)
+            overlayView = view
+            LogStore.log(TAG, "Chat overlay added")
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Failed to add chat overlay", e)
+        }
+    }
+
+    private fun removeStreamOverlay() {
+        val view = overlayView ?: return
+        overlayView = null
+        overlayChatText = null
+        try {
+            (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(view)
+        } catch (e: Exception) {
+            LogStore.logError(TAG, "Failed to remove chat overlay", e)
+        }
+    }
+
+    private fun onViewerChat(text: String) {
+        val clean = text.trim().take(200)
+        if (clean.isEmpty()) return
+        LogStore.log(TAG, "Viewer chat: $clean")
+        runOnMainThread {
+            val tv = overlayChatText ?: return@runOnMainThread
+            val existing = tv.text?.toString().orEmpty()
+            val lines = (existing + "\nWife: $clean").lines()
+            tv.text = lines.takeLast(30).joinToString("\n")
+        }
     }
 
     private fun sendVolumesToViewer() {
@@ -964,6 +1142,7 @@ class StreamService : Service() {
         private const val AUDIO_TRACK_ID = "screen_audio"
         private const val DATA_CHANNEL_LABEL = "audio-pcm"
         private const val CTRL_CHANNEL_LABEL = "ctrl"
+        private const val CHAT_CHANNEL_LABEL = "chat"
 
         private const val AUDIO_SAMPLE_RATE = 48000
         private const val AUDIO_CHANNELS = 2
