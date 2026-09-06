@@ -28,6 +28,15 @@ function parseIceServers() {
     .filter(Boolean)
     .map((url) => ({ urls: url }));
 
+  // Free public TURN fallback (Metered Open Relay) used when no TURN_SERVERS
+  // env is set. Media is DTLS-encrypted end to end, so the relay cannot see
+  // stream content. Override with your own TURN server via TURN_SERVERS.
+  const defaultTurn = [
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  ];
+
   const turn = (process.env.TURN_SERVERS || '')
     .split(',')
     .map((entry) => entry.trim())
@@ -37,7 +46,7 @@ function parseIceServers() {
       return { urls: url, username, credential };
     });
 
-  return [...stun, ...turn];
+  return [...stun, ...(turn.length ? turn : defaultTurn)];
 }
 
 const iceServers = parseIceServers();
