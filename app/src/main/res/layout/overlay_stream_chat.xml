@@ -6,12 +6,12 @@
     <!-- Minimized bubble -->
     <TextView
         android:id="@+id/overlayBubble"
-        android:layout_width="52dp"
-        android:layout_height="52dp"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
         android:background="@drawable/bg_chat_bubble"
         android:gravity="center"
         android:text="💬"
-        android:textSize="22sp" />
+        android:textSize="10sp" />
 
     <!-- Expanded panel -->
     <LinearLayout
