@@ -1063,6 +1063,12 @@ class StreamService : Service() {
         isAudioCapturing = true
         audioChunkSeq = 0
         audioCaptureThread = Thread({
+            // FEC: every 4th chunk is followed by an XOR parity packet covering
+            // the group, so the viewer can reconstruct any single lost chunk.
+            // Cellular loss is usually isolated single packets, so this removes
+            // most audible dropouts without adding retransmission delay.
+            val fecGroup = arrayOfNulls<ByteArray>(4)
+            var sentFec = false
             try {
                 record.startRecording()
                 val chunkBytes = ByteArray(BYTES_PER_CHUNK)
@@ -1086,6 +1092,31 @@ class StreamService : Service() {
                     if (dc?.state() == DataChannel.State.OPEN) {
                         val buffer = DataChannel.Buffer(ByteBuffer.wrap(combined), true)
                         dc.send(buffer)
+
+                        fecGroup[seq and 3] = chunkBytes.copyOf()
+                        if ((seq and 3) == 3) {
+                            val parity = ByteArray(BYTES_PER_CHUNK)
+                            for (i in 0 until BYTES_PER_CHUNK) {
+                                parity[i] = (
+                                    fecGroup[0]!![i].toInt() xor
+                                    fecGroup[1]!![i].toInt() xor
+                                    fecGroup[2]!![i].toInt() xor
+                                    fecGroup[3]!![i].toInt()
+                                ).toByte()
+                            }
+                            val parityPacket = ByteBuffer.allocate(SEQ_BYTES + TIMESTAMP_BYTES + BYTES_PER_CHUNK)
+                                .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                                .putInt(-1)          // marks a parity packet
+                                .putInt(seq - 3)     // group base seq
+                                .putInt(0)
+                                .put(parity)
+                                .array()
+                            dc.send(DataChannel.Buffer(ByteBuffer.wrap(parityPacket), true))
+                            if (!sentFec) {
+                                sentFec = true
+                                LogStore.log(TAG, "Audio FEC enabled (1 parity per 4 chunks)")
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {

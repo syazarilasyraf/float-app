@@ -228,7 +228,10 @@
     // instead the chunks feed a ring buffer inside an AudioWorklet:
     //   - chunks are re-inserted in capture-timestamp order (channel is unordered)
     //   - capture-time gaps become inserted silence (preserves A/V sync)
-    //   - a target buffer (default 150ms, sync-slider adjustable) absorbs jitter
+    //   - sender sends XOR parity every 4 chunks; single lost chunks are
+    //     reconstructed before they ever reach the worklet
+    //   - the target buffer adapts to measured network jitter (60-400ms),
+    //     with the sync slider as a manual offset on top
     //   - overflow trims back to target (absorbs clock drift between devices)
     //   - underruns ramp to silence instead of clicking
     // ------------------------------------------------------------------
@@ -237,6 +240,9 @@
     const SAMPLES_PER_10MS = SAMPLE_RATE / 100;
     const BYTES_PER_CHUNK = SAMPLES_PER_10MS * CHANNELS * 2;
     const BASE_BUFFER_MS = 150;
+    let jitterEmaMs = 0;      // measured network jitter (EMA of arrival deviation)
+    let adaptiveBaseMs = BASE_BUFFER_MS;
+    let lastArrivalMs = null;
 
     const AUDIO_WORKLET_CODE = `
 class PcmPlayerProcessor extends AudioWorkletProcessor {
@@ -460,12 +466,19 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
 
     function applyAudioTarget() {
       if (!audioWorkletNode) return;
-      const targetMs = Math.min(800, Math.max(30, BASE_BUFFER_MS + syncOffsetMs));
+      const targetMs = Math.min(800, Math.max(30, adaptiveBaseMs + syncOffsetMs));
       audioWorkletNode.port.postMessage({
         type: 'target',
         frames: Math.round(targetMs * SAMPLE_RATE / 1000),
       });
     }
+
+    // Adapt the buffer to measured network jitter: cellular links need more
+    // slack than quiet Wi-Fi. Runs on top of the manual sync-slider offset.
+    setInterval(() => {
+      adaptiveBaseMs = Math.min(400, Math.max(60, 60 + jitterEmaMs * 8));
+      applyAudioTarget();
+    }, 2000);
 
     syncSlider.addEventListener('input', () => {
       syncOffsetMs = parseInt(syncSlider.value, 10);
@@ -534,6 +547,85 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
 
     let fallbackSeq = 0; // for old APKs that send no sequence number
 
+    // FEC state: the sender follows every group of 4 chunks with an XOR
+    // parity packet, so a single lost chunk can be reconstructed here instead
+    // of becoming an audible gap. Cellular loss is mostly isolated singles.
+    const fecGroups = new Map();
+
+    function pushChunk(seq, pcmBytes) {
+      const pcm16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, SAMPLES_PER_10MS * CHANNELS);
+      const left = new Float32Array(SAMPLES_PER_10MS);
+      const right = new Float32Array(SAMPLES_PER_10MS);
+      for (let i = 0; i < SAMPLES_PER_10MS; i++) {
+        left[i] = pcm16[i * 2] / 32768.0;
+        right[i] = pcm16[i * 2 + 1] / 32768.0;
+      }
+      audioWorkletNode.port.postMessage({ type: 'push', seq, left, right });
+    }
+
+    function fecTryRebuild(g) {
+      if (g.rebuilt || !g.parity) return;
+      let missingIdx = -1;
+      let present = 0;
+      for (let i = 0; i < 4; i++) {
+        if (g.payloads[i]) present++;
+        else if (missingIdx === -1) missingIdx = i;
+        else return; // more than one missing: unrecoverable
+      }
+      if (present !== 3) return;
+      const out = new Uint8Array(g.parity.length);
+      out.set(g.parity);
+      for (let i = 0; i < 4; i++) {
+        if (i === missingIdx || !g.payloads[i]) continue;
+        const p = g.payloads[i];
+        for (let j = 0; j < out.length; j++) out[j] ^= p[j];
+      }
+      g.rebuilt = true;
+      pushChunk(g.base + missingIdx, out);
+      console.log('FEC: reconstructed lost audio chunk', g.base + missingIdx);
+    }
+
+    function fecPrune(frontierBase) {
+      for (const key of fecGroups.keys()) {
+        if (key < frontierBase - 16) fecGroups.delete(key);
+      }
+    }
+
+    function fecStore(seq, payload) {
+      const base = seq - (seq % 4);
+      let g = fecGroups.get(base);
+      if (!g) {
+        g = { base, payloads: [null, null, null, null], parity: null, rebuilt: false };
+        fecGroups.set(base, g);
+      }
+      if (!g.payloads[seq % 4]) g.payloads[seq % 4] = payload;
+      if (g.parity) fecTryRebuild(g);
+      fecPrune(base);
+    }
+
+    function fecStoreParity(base, parity) {
+      let g = fecGroups.get(base);
+      if (!g) {
+        g = { base, payloads: [null, null, null, null], parity: null, rebuilt: false };
+        fecGroups.set(base, g);
+      }
+      g.parity = parity;
+      fecTryRebuild(g);
+      fecPrune(base);
+    }
+
+    function trackJitter() {
+      const nowMs = performance.now();
+      if (lastArrivalMs !== null) {
+        const dt = nowMs - lastArrivalMs;
+        if (dt < 300) {
+          const dev = Math.abs(dt - 10);
+          jitterEmaMs = jitterEmaMs * 0.95 + dev * 0.05;
+        }
+      }
+      lastArrivalMs = nowMs;
+    }
+
     function setupAudioPlayback(dc) {
       dc.onopen = () => {
         console.log('audio-pcm data channel open');
@@ -541,11 +633,17 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
       dc.onclose = () => {
         console.log('audio-pcm data channel closed');
         fallbackSeq = 0;
+        lastArrivalMs = null;
+        jitterEmaMs = 0;
+        fecGroups.clear();
         audioWorkletNode?.port.postMessage({ type: 'reset' });
       };
       dc.onerror = (err) => {
         console.error('audio-pcm data channel error', err);
         fallbackSeq = 0;
+        lastArrivalMs = null;
+        jitterEmaMs = 0;
+        fecGroups.clear();
         audioWorkletNode?.port.postMessage({ type: 'reset' });
       };
 
@@ -562,28 +660,24 @@ registerProcessor('pcm-player', PcmPlayerProcessor);
         }
 
         const view = new DataView(buffer);
-        // New format: int32 seq + int64 timestamp + PCM.
-        // Old format: int64 timestamp + PCM (synthesize a local sequence).
-        let seq;
-        let pcmOffset;
         if (buffer.byteLength >= 12 + BYTES_PER_CHUNK) {
-          seq = view.getInt32(0, true);
-          pcmOffset = 12;
+          const seq = view.getInt32(0, true);
+          if (seq === -1) {
+            // FEC parity packet: [ seq=-1, groupBaseSeq, 0, parityPayload ]
+            fecStoreParity(view.getInt32(4, true), new Uint8Array(buffer, 12, BYTES_PER_CHUNK));
+            return;
+          }
+          // New format: int32 seq + int64 timestamp + PCM.
+          const payload = new Uint8Array(buffer, 12, BYTES_PER_CHUNK);
+          fecStore(seq, payload);
+          trackJitter();
+          pushChunk(seq, payload);
         } else {
-          seq = fallbackSeq++;
-          pcmOffset = 8;
+          // Old format: int64 timestamp + PCM (synthesize a local sequence).
+          const payload = new Uint8Array(buffer, 8, BYTES_PER_CHUNK);
+          trackJitter();
+          pushChunk(fallbackSeq++, payload);
         }
-
-        const pcm16 = new Int16Array(buffer, pcmOffset, SAMPLES_PER_10MS * CHANNELS);
-
-        const left = new Float32Array(SAMPLES_PER_10MS);
-        const right = new Float32Array(SAMPLES_PER_10MS);
-        for (let i = 0; i < SAMPLES_PER_10MS; i++) {
-          left[i] = pcm16[i * 2] / 32768.0;
-          right[i] = pcm16[i * 2 + 1] / 32768.0;
-        }
-
-        audioWorkletNode.port.postMessage({ type: 'push', seq, left, right });
       };
     }
 
